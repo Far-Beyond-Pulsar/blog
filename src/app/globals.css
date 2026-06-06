@@ -1,0 +1,192 @@
+@import "tailwindcss";
+@import "@fontsource/opendyslexic";
+
+:root {
+  --accent: #0ea5e9;
+  --accent-dim: rgba(14, 165, 233, 0.15);
+  --surface: #0c0c0c;
+  --border: rgba(255, 255, 255, 0.07);
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: #000;
+  color: #f4f4f5;
+  min-height: 100vh;
+}
+
+/* Prose styles for blog post content */
+.prose {
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.8;
+  font-size: 1.0625rem;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  color: #fff;
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 2em;
+  margin-bottom: 0.6em;
+}
+
+.prose h1 { font-size: 2rem; }
+.prose h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4em; }
+.prose h3 { font-size: 1.2rem; }
+
+.prose p { margin-bottom: 1.4em; }
+
+.prose a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.prose a:hover { text-decoration: underline; }
+
+/* Inline code — accent-colored to stand out from prose */
+.prose code,
+.inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: rgba(14, 165, 233, 0.09);
+  border: 1px solid rgba(14, 165, 233, 0.18);
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+  color: #7dd3fc;
+}
+
+.prose pre {
+  background: #0a0a0a;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5em 0;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+.prose pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  color: #d1d5db;
+}
+
+.prose blockquote {
+  border-left: 3px solid var(--accent);
+  margin-left: 0;
+  padding-left: 1.25rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.5rem;
+  margin-bottom: 1.4em;
+}
+
+.prose li { margin-bottom: 0.4em; }
+
+.prose ul li { list-style: disc; }
+.prose ol li { list-style: decimal; }
+
+.prose img {
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  margin: 1.5em auto;
+  display: block;
+}
+
+.prose hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(255, 255, 255, 0.18) 20%,
+    rgba(255, 255, 255, 0.18) 80%,
+    transparent
+  );
+  margin: 3em 0;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+  margin-bottom: 1.5em;
+}
+
+.prose th,
+.prose td {
+  padding: 0.6em 0.9em;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.prose th {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 600;
+}
+
+/* Monaco replaces rehype-highlight; this rule is kept as a safety net */
+.hljs { background: transparent !important; }
+
+/* ── Accessibility ─────────────────────────────────────── */
+
+.dyslexia-font body,
+.dyslexia-font .prose,
+.dyslexia-font .prose p,
+.dyslexia-font .prose li,
+.dyslexia-font nav,
+.dyslexia-font button,
+.dyslexia-font a {
+  font-family: 'OpenDyslexic', sans-serif !important;
+  word-spacing: 0.1em;
+  letter-spacing: 0.03em;
+}
+
+.high-contrast body { background: #000 !important; color: #fff !important; }
+.high-contrast .prose a { color: #ffff00 !important; text-decoration-thickness: 2px !important; }
+.high-contrast .prose code { color: #fff !important; background: #111 !important; }
+
+.increase-spacing .prose p,
+.increase-spacing .prose li {
+  line-height: 2 !important;
+  letter-spacing: 0.06em !important;
+  word-spacing: 0.16em !important;
+}
+.increase-spacing .prose h1,
+.increase-spacing .prose h2,
+.increase-spacing .prose h3 {
+  letter-spacing: 0.04em !important;
+  line-height: 1.5 !important;
+}
+
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+.text-size-large .prose  { font-size: 1.1rem !important; }
+.text-size-larger .prose { font-size: 1.25rem !important; }

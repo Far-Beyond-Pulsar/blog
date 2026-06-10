@@ -41,9 +41,9 @@ export default function Header() {
           : 'bg-black/80 backdrop-blur-sm border-b border-white/[0.07]'
       }`}
     >
-      <div className="max-w-7xl mx-auto px-5 h-14 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-5 h-14 grid grid-cols-[1fr_auto_1fr] items-center">
         {/* Logo */}
-        <a href={`${BASE}/`} className="flex items-center gap-2.5 shrink-0">
+        <a href={`${BASE}/`} className="flex items-center gap-2.5 shrink-0 justify-self-start">
           <img
             src={`${BASE}/assets/pulsar.png`}
             alt="Pulsar"
@@ -56,7 +56,7 @@ export default function Header() {
         </a>
 
         {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="hidden md:flex items-center gap-1 justify-self-center">
           {NAV_LINKS.map(({ label, href, external }) => (
             <a
               key={label}
@@ -74,12 +74,12 @@ export default function Header() {
         </nav>
 
         {/* Right actions */}
-        <div className="hidden md:flex items-center gap-2">
+        <div className="flex items-center gap-2 justify-self-end">
           <a
             href="https://github.com/Far-Beyond-Pulsar/Pulsar-Native"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-white/55 hover:text-white transition-colors"
+            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-sm text-white/55 hover:text-white transition-colors"
           >
             <Github className="w-4 h-4" />
             <span>GitHub</span>
@@ -88,20 +88,20 @@ export default function Header() {
             href="https://pulsarnative.com/docs/getting-started/installation/windows"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center px-4 py-1.5 bg-[#0ea5e9] hover:bg-[#0284c7] text-white text-sm font-medium rounded-lg transition-colors"
+            className="hidden md:flex items-center px-4 py-1.5 bg-[#0ea5e9] hover:bg-[#0284c7] text-white text-sm font-medium rounded-lg transition-colors"
           >
             Get Started
           </a>
-        </div>
 
-        {/* Mobile toggle */}
-        <button
-          className="md:hidden p-2 text-white/60 hover:text-white"
-          onClick={() => setMenuOpen(o => !o)}
-          aria-label="Toggle menu"
-        >
-          {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
+          {/* Mobile toggle */}
+          <button
+            className="md:hidden p-2 text-white/60 hover:text-white"
+            onClick={() => setMenuOpen(o => !o)}
+            aria-label="Toggle menu"
+          >
+            {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile menu */}

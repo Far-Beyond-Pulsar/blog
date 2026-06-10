@@ -6,11 +6,21 @@ import { Github, Menu, X } from 'lucide-react';
 const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || '';
 
 const NAV_LINKS = [
-  { label: 'Features', href: 'https://pulsarnative.com/#features', external: true },
-  { label: 'Docs', href: 'https://pulsarnative.com/docs', external: true },
-  { label: 'Blog', href: `${BASE}/`, external: false },
-  { label: 'Changelog', href: 'https://github.com/Far-Beyond-Pulsar/Pulsar-Native/releases', external: true },
-  { label: 'Community', href: 'https://github.com/orgs/Far-Beyond-Pulsar/discussions', external: true },
+  { label: "Features", href: "/#features" },
+  { label: "Blog", href: "/blog" },
+  { label: "Docs", href: "/docs" },
+  { label: "Research", href: "/Research", external: true },
+  { label: "Studio", href: "/studio" },
+  {
+    label: "Changelog",
+    href: "https://github.com/Far-Beyond-Pulsar/Pulsar-Native/releases",
+    external: true,
+  },
+  {
+    label: "Community",
+    href: "https://github.com/orgs/Far-Beyond-Pulsar/discussions",
+    external: true,
+  },
 ];
 
 export default function Header() {

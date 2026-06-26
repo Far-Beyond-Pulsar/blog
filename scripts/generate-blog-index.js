@@ -66,6 +66,14 @@ for (const file of files) {
   const raw = fs.readFileSync(path.join(postsDir, file), 'utf-8');
   const { data, content } = parseFrontmatter(raw);
 
+  // Resolve thumbnail: full URLs pass through; relative paths (starting with /)
+  // get the NEXT_PUBLIC_CUSTOM_BASE_PATH prepended so static exports work.
+  const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || '';
+  let thumbnail = data.thumbnail || null;
+  if (thumbnail && !thumbnail.startsWith('http://') && !thumbnail.startsWith('https://')) {
+    thumbnail = BASE + thumbnail;
+  }
+
   posts.push({
     slug,
     title: data.title || slug,
@@ -74,6 +82,7 @@ for (const file of files) {
     tags: Array.isArray(data.tags) ? data.tags : data.tags ? [data.tags] : [],
     description: data.description || excerpt(content),
     readingTime: readingTime(content),
+    thumbnail,
     draft: data.draft === 'true',
   });
 }

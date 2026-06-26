@@ -4,6 +4,7 @@ date: "2026-06-26"
 author: "Tristan Poland"
 tags: ["rust", "filesystem", "game-engine", "architecture", "cloud", "pulsar"]
 description: "How Pulsar abstracts every file operation behind a swappable provider trait — making local disk, HTTP remote, and P2P collaborative sessions all look identical to every crate above them."
+thumbnail: /post_thumb/engine_fs.png
 ---
 
 ## Why Not Just Use std::fs?

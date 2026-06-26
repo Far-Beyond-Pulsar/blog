@@ -4,6 +4,7 @@ date: "2026-06-26"
 author: "Tristan Poland"
 tags: ["rust", "game-engine", "architecture", "subsystems", "reflection", "components", "pulsar"]
 description: "A thorough walkthrough of how Pulsar's subsystem and component architecture achieves genuine decoupling — components only import the subsystems they touch, the central engine knows nothing about any of them, and the whole system is open to extension by plugins without modifying engine code."
+thumbnail: /post_thumb/engine.png
 ---
 
 ## The Problem With Knowing Too Much

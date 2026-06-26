@@ -65,11 +65,19 @@ export default function BlogHome() {
             </p>
           </div>
         ) : (
-          <div className="space-y-px">
-            {posts.map((post, i) => (
-              <PostCard key={post.slug} post={post} featured={i === 0} />
-            ))}
-          </div>
+          <>
+            {/* Featured (latest) post — full-width with thumbnail on right */}
+            <PostCard key={posts[0].slug} post={posts[0]} featured={true} />
+
+            {/* Remaining posts — responsive card grid with thumbnails at top */}
+            {posts.length > 1 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
+                {posts.slice(1).map((post) => (
+                  <PostCard key={post.slug} post={post} featured={false} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

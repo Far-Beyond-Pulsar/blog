@@ -47,8 +47,25 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
     <div className="min-h-screen bg-black text-white">
 
       {/* Post header */}
-      <div className="border-b border-white/[0.07] bg-[#030303]">
-        <div className="max-w-5xl mx-auto px-5 pt-16 pb-12">
+      <div className="relative border-b border-white/[0.07] overflow-hidden">
+        {/* Thumbnail background */}
+        {meta.thumbnail && (
+          <>
+            <img
+              src={meta.thumbnail}
+              alt=""
+              aria-hidden="true"
+              className="absolute inset-0 w-full h-full object-cover object-center"
+            />
+            {/* dark overlay so text stays readable */}
+            <div className="absolute inset-0 bg-black/65" />
+          </>
+        )}
+
+        {/* Fallback background when no thumbnail */}
+        {!meta.thumbnail && <div className="absolute inset-0 bg-[#030303]" />}
+
+        <div className="relative max-w-5xl mx-auto px-5 pt-16 pb-12">
           <a
             href={`${BASE}/`}
             className="inline-flex items-center gap-1.5 text-sm text-white/35 hover:text-white/70 transition-colors mb-8"
@@ -62,7 +79,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
                 <a
                   key={tag}
                   href={`${BASE}/tags/${tag}`}
-                  className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-white/[0.06] text-white/50 hover:bg-white/[0.1] hover:text-white/80 transition-colors"
+                  className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-white/[0.08] text-white/60 hover:bg-white/[0.14] hover:text-white/90 transition-colors"
                 >
                   {tag}
                 </a>
@@ -73,11 +90,11 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
           <h1 className="text-3xl sm:text-4xl font-bold leading-tight mb-4">{meta.title}</h1>
 
           {meta.description && (
-            <p className="text-white/45 text-lg leading-relaxed mb-6 max-w-2xl">{meta.description}</p>
+            <p className="text-white/60 text-lg leading-relaxed mb-6 max-w-2xl">{meta.description}</p>
           )}
 
-          <div className="flex items-center gap-3 text-sm text-white/30">
-            <span className="font-medium text-white/50">{meta.author}</span>
+          <div className="flex items-center gap-3 text-sm text-white/40">
+            <span className="font-medium text-white/60">{meta.author}</span>
             <span>·</span>
             <time>{formatDate(meta.date)}</time>
             <span>·</span>

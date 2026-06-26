@@ -472,4 +472,4 @@ Helio is functional as a production renderer today. It runs Pulsar's scene pipel
 
 **Hardware raytraced ambient occlusion** via DXR / VK_KHR_ray_tracing is on the roadmap for platforms that support it. The current SSAO pass is fast and integrates with the deferred pipeline, but hardware RT removes its screen-space artifacts and handles geometry outside the camera's view.
 
-We're building in the open. The renderer source lives in [Pulsar-Native](https://github.com/Far-Beyond-Pulsar/Pulsar-Native). If any of this architecture is interesting to you — or if you see something we're doing wrong — we'd genuinely like to hear from you.
+We're building in the open. The renderer source lives in [Helio](https://github.com/Far-Beyond-Pulsar/Helio). If any of this architecture is interesting to you — or if you see something we're doing wrong — we'd genuinely like to hear from you.

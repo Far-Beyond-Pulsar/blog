@@ -14,6 +14,11 @@ export const metadata: Metadata = {
     template: '%s | Pulsar Blog',
   },
   description: 'Engineering updates, deep dives, and release notes from the Pulsar game engine team.',
+  icons: {
+    icon: '/assets/pulsar.png',
+    shortcut: '/assets/pulsar.png',
+    apple: '/assets/pulsar.png',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

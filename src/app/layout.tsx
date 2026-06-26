@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+
+const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || '';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import Header from '@/components/Header';
@@ -15,9 +17,9 @@ export const metadata: Metadata = {
   },
   description: 'Engineering updates, deep dives, and release notes from the Pulsar game engine team.',
   icons: {
-    icon: '/assets/pulsar.png',
-    shortcut: '/assets/pulsar.png',
-    apple: '/assets/pulsar.png',
+    icon: `${BASE}/assets/pulsar.png`,
+    shortcut: `${BASE}/assets/pulsar.png`,
+    apple: `${BASE}/assets/pulsar.png`,
   },
 };
 

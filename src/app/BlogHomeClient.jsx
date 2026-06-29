@@ -3,6 +3,13 @@
 import PostCard from "@/components/PostCard";
 import { useState, useMemo, useRef, useEffect } from "react";
 
+const styles = `
+.tag-dropdown-scroll::-webkit-scrollbar { width: 5px; }
+.tag-dropdown-scroll::-webkit-scrollbar-track { background: transparent; }
+.tag-dropdown-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 999px; }
+.tag-dropdown-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+`;
+
 export default function BlogHomeClient({
   posts,
   allTags,
@@ -31,6 +38,7 @@ export default function BlogHomeClient({
 
   return (
     <div className="min-h-screen bg-black text-white">
+      <style>{styles}</style>
       <div className="border-b border-white/[0.07] bg-[#030303]">
         <div className="max-w-5xl mx-auto px-5 pt-20 pb-16">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#0ea5e9]/25 bg-[#0ea5e9]/10 text-[#0ea5e9] text-xs font-semibold tracking-wide mb-6">
@@ -88,7 +96,7 @@ export default function BlogHomeClient({
                         className="w-full px-3 py-1.5 rounded-lg bg-black border border-white/[0.08] text-white text-xs placeholder-white/20 outline-none focus:border-[#0ea5e9]/40 transition-colors"
                       />
                     </div>
-                    <div className="max-h-60 overflow-y-auto">
+                    <div className="tag-dropdown-scroll max-h-60 overflow-y-auto">
                       {filtered.length === 0 ? (
                         <p className="px-3 py-4 text-xs text-white/20 text-center">
                           No tags match

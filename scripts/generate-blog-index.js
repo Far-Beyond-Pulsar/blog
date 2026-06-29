@@ -90,12 +90,22 @@ for (const file of files) {
 // Exclude drafts from index (still built as pages, just not listed)
 const published = posts.filter(p => !p.draft);
 
-// Collect all unique tags
-const allTags = [...new Set(published.flatMap(p => p.tags))].sort();
+// Collect all unique tags, sorted by frequency (most posts first), then alphabetically
+const tagCounts = {};
+for (const p of published) {
+  for (const t of p.tags) {
+    tagCounts[t] = (tagCounts[t] || 0) + 1;
+  }
+}
+const allTags = Object.keys(tagCounts).sort((a, b) => {
+  const diff = tagCounts[b] - tagCounts[a];
+  return diff !== 0 ? diff : a.localeCompare(b);
+});
 
 const index = {
   posts: published,
   allTags,
+  tagFreq: tagCounts,
   total: published.length,
   generated: new Date().toISOString(),
 };

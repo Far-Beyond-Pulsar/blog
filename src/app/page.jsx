@@ -1,5 +1,5 @@
 import { getBlogIndex } from "@/utils/blog";
-import PostCard from "@/components/PostCard";
+import BlogHomeClient from "./BlogHomeClient";
 
 export const metadata = {
   title: "Pulsar Blog",
@@ -8,78 +8,19 @@ export const metadata = {
 };
 
 const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || "";
+const VISIBLE_TAGS = 10;
 
 export default function BlogHome() {
-  const { posts, allTags, total } = getBlogIndex();
+  const { posts, allTags, tagFreq, total } = getBlogIndex();
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* Hero */}
-      <div className="border-b border-white/[0.07] bg-[#030303]">
-        <div className="max-w-5xl mx-auto px-5 pt-20 pb-16">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#0ea5e9]/25 bg-[#0ea5e9]/10 text-[#0ea5e9] text-xs font-semibold tracking-wide mb-6">
-            Engineering Blog
-          </div>
-          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight leading-tight mb-4">
-            From the Pulsar team
-          </h1>
-          <p className="text-white/45 text-base sm:text-lg max-w-2xl leading-relaxed">
-            Deep dives into renderer architecture, ECS design, Rust patterns,
-            and everything else we learn building a GPU-driven game engine from
-            scratch.
-          </p>
-          <p className="text-xs text-white/20 mt-6">
-            {total} {total === 1 ? "post" : "posts"} published
-          </p>
-        </div>
-      </div>
-
-      <div className="max-w-5xl mx-auto px-5 py-14">
-        {/* Tag filter row */}
-        {allTags.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-12">
-            <a
-              href="/"
-              className="px-3 py-1 rounded-full text-xs font-medium bg-[#0ea5e9] text-white transition-colors"
-            >
-              All
-            </a>
-            {allTags.map((tag) => (
-              <a
-                key={tag}
-                href={`${BASE}/tags/${tag}`}
-                className="px-3 py-1 rounded-full text-xs font-medium bg-white/[0.06] text-white/50 hover:bg-white/[0.1] hover:text-white/80 transition-colors"
-              >
-                {tag}
-              </a>
-            ))}
-          </div>
-        )}
-
-        {/* Post list */}
-        {posts.length === 0 ? (
-          <div className="text-center py-24">
-            <p className="text-white/30 text-sm">
-              No posts yet. Add markdown files to{" "}
-              <code className="font-mono text-white/50">public/posts/</code>
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Featured (latest) post — full-width with thumbnail on right */}
-            <PostCard key={posts[0].slug} post={posts[0]} featured={true} />
-
-            {/* Remaining posts — responsive card grid with thumbnails at top */}
-            {posts.length > 1 && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
-                {posts.slice(1).map((post) => (
-                  <PostCard key={post.slug} post={post} featured={false} />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
+    <BlogHomeClient
+      posts={posts}
+      allTags={allTags}
+      tagFreq={tagFreq}
+      total={total}
+      base={BASE}
+      visibleTags={VISIBLE_TAGS}
+    />
   );
 }

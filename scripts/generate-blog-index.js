@@ -118,7 +118,7 @@ function resolveUrl(relativePath) {
 const externalPosts = published.map(p => ({
   slug: p.slug,
   title: p.title,
-  url: resolveUrl(`${BASE}/posts/${p.slug}`),
+  url: resolveUrl(`${BASE}/${p.slug}`),
   date: p.date,
   author: p.author,
   tags: p.tags,

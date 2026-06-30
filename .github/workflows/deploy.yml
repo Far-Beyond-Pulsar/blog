@@ -31,6 +31,7 @@ jobs:
         run: npm run build
         env:
           NEXT_PUBLIC_CUSTOM_BASE_PATH: /blog
+          NEXT_PUBLIC_SITE_URL: https://pulsarnative.com
 
       - uses: actions/upload-pages-artifact@v3
         with:

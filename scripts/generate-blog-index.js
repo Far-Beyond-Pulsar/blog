@@ -1,6 +1,6 @@
 /**
  * Reads all markdown posts from public/posts/, extracts frontmatter,
- * computes reading time, and writes public/blog-index.json.
+ * computes reading time, writes blog-index.json, blog-preview.json, and blog-all.json.
  *
  * Post filenames become slugs: "2024-01-15-helio-renderer.md" → "2024-01-15-helio-renderer"
  */
@@ -9,7 +9,9 @@ const fs = require('fs');
 const path = require('path');
 
 const postsDir = path.join(process.cwd(), 'public/posts');
-const outputFile = path.join(process.cwd(), 'public/blog-index.json');
+const indexFile = path.join(process.cwd(), 'public/blog-index.json');
+const previewFile = path.join(process.cwd(), 'public/blog-preview.json');
+const allFile = path.join(process.cwd(), 'public/blog-all.json');
 
 // Minimal frontmatter parser (avoids requiring gray-matter at build-script level via CJS)
 function parseFrontmatter(raw) {
@@ -102,6 +104,30 @@ const allTags = Object.keys(tagCounts).sort((a, b) => {
   return diff !== 0 ? diff : a.localeCompare(b);
 });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || '';
+const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || '';
+
+function resolveUrl(relativePath) {
+  if (!relativePath) return null;
+  if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) return relativePath;
+  if (!SITE_URL) return relativePath;
+  return `${SITE_URL}${relativePath}`;
+}
+
+// Build external-facing post format with absolute URLs
+const externalPosts = published.map(p => ({
+  slug: p.slug,
+  title: p.title,
+  url: resolveUrl(`${BASE}/posts/${p.slug}`),
+  date: p.date,
+  author: p.author,
+  tags: p.tags,
+  description: p.description,
+  readingTime: p.readingTime,
+  thumbnail: resolveUrl(p.thumbnail),
+  draft: p.draft,
+}));
+
 const index = {
   posts: published,
   allTags,
@@ -110,5 +136,14 @@ const index = {
   generated: new Date().toISOString(),
 };
 
-fs.writeFileSync(outputFile, JSON.stringify(index, null, 2));
+fs.writeFileSync(indexFile, JSON.stringify(index, null, 2));
 console.log(`Generated blog-index.json — ${published.length} posts, ${allTags.length} tags`);
+
+// Write blog-all.json — all published posts with absolute URLs
+fs.writeFileSync(allFile, JSON.stringify(externalPosts, null, 2));
+console.log(`Generated blog-all.json — ${externalPosts.length} posts with absolute URLs`);
+
+// Write blog-preview.json — top 5 most recent with absolute URLs
+const previewPosts = externalPosts.slice(0, 5);
+fs.writeFileSync(previewFile, JSON.stringify(previewPosts, null, 2));
+console.log(`Generated blog-preview.json — ${previewPosts.length} posts (top 5)`);

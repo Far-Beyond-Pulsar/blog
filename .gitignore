@@ -11,3 +11,5 @@ next-env.d.ts
 
 # Generated at build time
 /public/blog-index.json
+/public/blog-preview.json
+/public/blog-all.json

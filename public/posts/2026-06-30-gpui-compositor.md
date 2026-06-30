@@ -97,6 +97,20 @@ For a typical scroll interaction — say, reading through a document — the pro
 
 The user perceives the first scroll event as a normal frame, followed by many frames of perfectly smooth scrolling, followed by a single slightly-less-smooth frame when the buffer edge is hit, followed by more smooth frames. The average frame time over the scrolling session drops to roughly the cost of a blit per frame.
 
+### Why GPUI Doesn't Do This Already
+
+There's a reason an overscroll buffer wasn't the default from day one. The trick works perfectly when content has stable height — fixed line heights in a code editor, uniform row heights in a list, known element sizes in a file tree. An element that was at Y position 1000 on frame N is still at Y position 1000 on frame N+1, just offset by the scroll delta. The cached pixels remain valid.
+
+The trick breaks when elements above the viewport can change height unpredictably. If an element at Y=200 grows by 50 pixels, every element below it shifts down by 50 pixels. The overscroll buffer now shows stale content at wrong positions — the pixels are there, but they've moved. You can't just blit with an offset anymore; you need to re-render the affected region. If elements change height frequently, the overscroll buffer provides no benefit and adds complexity.
+
+This is the fundamental tension. Browsers deal with it because the web's layout model has relatively stable block sizes during scroll — changes are driven by explicit events (image load, font swap, media query), not by the act of scrolling itself. When a change does happen, the browser invalidates the affected tiles and re-rasterizes them. It's a tile invalidation problem, not an impossibility. But it imposes real engineering cost: every tile needs dirty tracking, every rendered region needs versioning, and every scroll needs an invalidation check.
+
+GPUI's `List` and `UniformList` elements already exploit a similar principle at the element tree level — they cache layout data for offscreen items and skip prepaint for anything outside the viewport, re-laying-out only items that scroll into view. But items entering the viewport still go through the full paint → insert_primitive → sort → upload → render pipeline; the framework just has fewer items to process. The contract they rely on is explicit: items must have stable height, or the framework falls back to the generic path where every item is re-laid-out each frame.
+
+The overscroll buffer operates at a completely different level of the stack. Instead of caching element data and re-painting items on scroll, it caches rendered pixels — the output of the entire pipeline. A `List` item that enters the viewport via scrolling within the overscroll buffer doesn't need to be painted, sorted, uploaded, or drawn. It was already painted into the buffer on a previous frame. The GPU just shifts the pixels. This is a fundamentally stronger cache: it skips everything below the element tree rather than just reducing how many items the tree has to process.
+
+For variable-height content, the overscroll buffer degrades gracefully. Every content change triggers a full commit (the same as today), and the buffer is re-rendered. The fast scroll path only activates during scrolls that don't involve height changes. This is the pragmatic middle ground: get the win for the common case, fall back for the edge case, and never produce incorrect output.
+
 Now let's talk about how we're planning to build this.
 
 ---
@@ -969,6 +983,20 @@ The one concern is lock contention. If the main thread allocates many atlas slot
 
 The design is complete enough to describe, but there are open questions we haven't resolved.
 
+### How Do We Handle Variable-Height Content?
+
+This is the biggest unresolved question. The overscroll buffer is correct when content heights are stable between scroll events — the cached pixels remain valid because nothing moved except the viewport. But if an element above the viewport changes height, every element below it shifts, and the overscroll buffer's content is now wrong. You can't just blit with an offset — you need to re-render.
+
+There are three approaches we're considering:
+
+**Approach 1: Require the stable-height contract explicitly.** Scroll containers that want the overscroll fast path must declare that their content has stable heights. `List` and `UniformList` already require this — the overscroll buffer would be enabled for them by default, disabled for generic scrollable `div` elements unless the application opts in. This is the honest approach: it tells the user what the optimization requires and lets them decide.
+
+**Approach 2: Detect height changes automatically.** The scene finish phase already computes damage rectangles. If the damage rect from a content change doesn't intersect the scrolled area's stable region, the overscroll buffer is valid. If it does intersect — meaning something changed position within the cached area — the buffer is invalidated and re-rendered. This is what browsers do, and it works because tile-level dirty tracking catches the mismatch. The complexity is in tracking which tiles are affected by a layout change.
+
+**Approach 3: Never invalidate, just re-render the affected tile on the next scroll.** If the user scrolls and the blit would read from a stale tile, the compositor re-renders that tile before blitting. The main thread doesn't need to know about height changes — it just commits when content changes, and the compositor figures out what needs updating. This moves the complexity to the compositor but keeps the main thread path simple.
+
+Our current leaning is a combination of 1 and 2: the stable-height contract is required for the GPU-level fast path (the compositor won't cache tiles for containers that declare variable-height content), but the compositor also has a tile-versioning system that detects stale content and triggers re-render for containers that don't explicitly opt out. The exact balance is still being debated.
+
 ### How Do Scroll Containers Opt In?
 
 The separation of scroll from content requires scroll containers to change their behavior. Currently they call `cx.notify()`. We want them to call something that doesn't trigger a full re-render. The question is the API.
@@ -1043,7 +1071,7 @@ A few things that took us longer than expected to figure out:
 
 **The scroll optimization is the real win, not the thread offloading.** The compositor thread removes the finish and upload phases from the main thread's per-frame budget, which is meaningful. But the overscroll buffer removes almost the entire frame cost from every scroll interaction, which is transformative. When we pitched this design to our team, everyone focused on the compositor thread because it sounds more impressive. The overscroll buffer is the part that will actually make scrolling feel instantaneous. If we had to choose one component to ship, we'd ship the overscroll buffer first and add the compositor thread later.
 
-**The hardest part is the scroll container API change.** Everything in the compositor design is a backend concern — new files, new threads, new GPU resources. The scroll container change is a frontend concern that affects every element tree that implements scrolling. It's a breaking change (for the efficient path), and it requires educating framework users about the new pattern. We're still debating whether to make the scroll-specific notification a trait method with a default implementation that calls `cx.notify()` (backward compatible, no breakage, but no benefit until users opt in) or a new method on existing scroll containers (immediate benefit for all framework users, but requires updating every container we own).
+**The hardest part is the scroll container API change.** Everything in the compositor design is a backend concern — new files, new threads, new GPU resources. The scroll container change is a frontend concern that affects every element tree that implements scrolling. It's a breaking change (for the efficient path), and it requires educating framework users about the new pattern. We're still debating whether to make the scroll-specific notification a trait method with a default implementation that calls `cx.notify()` (backward compatible, no breakage, but no benefit until users opt in) or a new method on existing scroll containers (immediate benefit for all framework users, but requires updating every container we own). The bright spot is that `List` and `UniformList` already have the stable-height contract baked into their API — they're natural early adopters and will see the largest perf improvement from the overscroll buffer with minimal internal changes.
 
 ---
 

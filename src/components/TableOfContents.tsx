@@ -112,6 +112,7 @@ export default function TableOfContents({ headings }: { headings: Heading[] }) {
     <nav
       ref={navRef}
       aria-label="Table of contents"
+      className="toc-scroll"
       style={{
         borderRadius: 12,
         padding: scrolled ? '16px 18px' : '0px',
@@ -124,7 +125,7 @@ export default function TableOfContents({ headings }: { headings: Heading[] }) {
         overflowY: scrolled ? 'auto' : 'visible',
         overscrollBehavior: 'contain',
         scrollbarWidth: 'thin',
-        scrollbarColor: 'rgba(255,255,255,0.1) transparent',
+        scrollbarColor: 'rgba(255,255,255,0.08) transparent',
       }}
     >
       <p style={{

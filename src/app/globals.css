@@ -146,6 +146,21 @@ body {
   font-weight: 600;
 }
 
+/* ── Custom scrollbar for TOC sidebar ───────────────────── */
+.toc-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+.toc-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.toc-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+.toc-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 /* Monaco replaces rehype-highlight; this rule is kept as a safety net */
 .hljs { background: transparent !important; }
 

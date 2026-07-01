@@ -503,7 +503,7 @@ The compositor stores the finished scene as `previous_scene` for the next frame'
 
 ## The Overscroll Buffer
 
-The compositor thread removes the finish and upload phases from the main thread's per-frame budget, which is meaningful. But the overscroll buffer removes almost the entire frame cost from every scroll interaction, which is transformative. When we pitched this design to our team, everyone focused on the compositor thread because it sounds more impressive. The overscroll buffer is the part that will actually make scrolling feel instantaneous.
+The compositor thread removes the finish and upload phases from the main thread's per-frame budget, which is meaningful. But the overscroll buffer removes almost the entire frame cost from every scroll interaction, which is transformative. The overscroll buffer is the part that will actually make scrolling feel instantaneous.
 
 ### How Browsers Handle Scroll
 

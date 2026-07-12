@@ -2,7 +2,7 @@
 title: "Designing a Render Graph That Doesn't Get in the Way"
 date: "2026-06-29"
 author: "Tristan Poland"
-tags: ["renderer", "wgpu", "rust", "helio", "architecture", "graph", "passes"]
+tags: ["rust", "helio", "graphics", "architecture", "pulsar"]
 description: "A detailed walkthrough of Helio's render graph — how passes declare resource dependencies, the lazy bind-group rebuild pattern, subpass chaining for framebuffer compression, and why we chose typed passes over a JSON graph."
 thumbnail: /post_thumb/render_graph.png
 ---

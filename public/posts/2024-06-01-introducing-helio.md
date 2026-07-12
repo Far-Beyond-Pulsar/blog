@@ -2,7 +2,7 @@
 title: "Introducing Helio: A GPU-Driven Renderer Built in Rust"
 date: "2026-06-06"
 author: "Tristan Poland"
-tags: ["renderer", "wgpu", "rust", "game-engine", "graphics"]
+tags: ["rust", "game-engine", "helio", "graphics", "pulsar"]
 description: "A deep technical walkthrough of Helio — the custom GPU-driven deferred renderer we built for Pulsar. Why we built it, how its pipeline is structured, and what we learned along the way."
 thumbnail: /post_thumb/helio_showcase.png
 ---

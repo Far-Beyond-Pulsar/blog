@@ -2,7 +2,7 @@
 title: "Cross-Platform GPU Programming Without Losing Your Mind"
 date: "2026-06-29"
 author: "Tristan Poland"
-tags: ["renderer", "wgpu", "rust", "vulkan", "metal", "dx12", "webgpu", "helio", "cross-platform"]
+tags: ["rust", "helio", "graphics", "architecture", "pulsar"]
 description: "A practical field guide to the platform differences that actually matter when building a GPU renderer on wgpu — bindless limits, indirect draw capabilities, texture format support, and the WGSL footguns that look the same everywhere but behave differently nowhere you expect."
 thumbnail: /post_thumb/cross_platform.png
 ---

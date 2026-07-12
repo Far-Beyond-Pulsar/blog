@@ -2,7 +2,7 @@
 title: "Pulsar's Reflection System: From Macro to Properties Panel"
 date: "2026-06-26"
 author: "Tristan Poland"
-tags: ["rust", "reflection", "game-engine", "macros", "ui", "pulsar"]
+tags: ["rust", "game-engine", "reflection", "editor", "pulsar"]
 description: "A deep dive into how Pulsar's runtime reflection system works — from the EngineClass derive macro and property attributes through to the Properties panel that uses that metadata to generate a live editing UI with zero handwritten widget code."
 thumbnail: /post_thumb/props.png
 ---

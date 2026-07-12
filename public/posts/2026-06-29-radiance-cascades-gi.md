@@ -2,7 +2,7 @@
 title: "Radiance Cascades: Probe-Based Global Illumination"
 date: "2026-06-29"
 author: "Tristan Poland"
-tags: ["renderer", "wgpu", "rust", "helio", "gi", "radiance-cascades", "global-illumination", "graphics"]
+tags: ["rust", "helio", "graphics", "architecture", "pulsar"]
 description: "A technical walkthrough of Helio's probe-based global illumination system — how a sparse grid of radiance probes captures indirect light, the cascade atlas format, multi-bounce accumulation, ambient fallback outside the grid, and why we're waiting on hardware ray tracing for the next step."
 thumbnail: /post_thumb/radiance_cascades.png
 ---

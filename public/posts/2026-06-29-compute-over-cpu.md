@@ -2,7 +2,7 @@
 title: "Why Compute Shaders Beat CPU Loops: Helio's O(1) Frame Cost Philosophy"
 date: "2026-06-29"
 author: "Tristan Poland"
-tags: ["renderer", "wgpu", "rust", "gpu", "helio", "compute", "architecture", "optimization"]
+tags: ["rust", "helio", "architecture", "optimization", "pulsar"]
 description: "A deep technical walkthrough of Helio's GPU-driven architecture — why the CPU never iterates over objects, how every frame costs the same regardless of scene complexity, and what it took to make that work in practice."
 thumbnail: /post_thumb/compute_over_cpu.png
 ---

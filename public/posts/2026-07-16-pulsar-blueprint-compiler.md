@@ -2,7 +2,7 @@
 title: "Pulsar's Blueprint Compiler: Graphs, Types, and Transpilation"
 date: "2026-07-16"
 author: "Tristan Poland"
-tags: ["rust", "blueprint", "compiler", "type-system", "bytecode", "codegen", "transpilation", "pulsar"]
+tags: ["rust", "game-engine", "blueprint", "architecture", "pulsar"]
 description: "A deep dive into Pulsar's Blueprint Graph Compiler — how graph descriptions are structured, how type checking validates connections with a coercion registry, how data flow analysis computes pure node evaluation order, how the exec_output!() marker macro is lowered via AST transformation, and how the same graph compiles to both bytecode for the editor VM and native Rust for shipping builds."
 thumbnail: /post_thumb/blueprint-compiler.png
 ---

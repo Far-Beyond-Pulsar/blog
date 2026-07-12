@@ -2,7 +2,7 @@
 title: "Building an In-Engine GPU Profiler for Fun and Frame Time"
 date: "2026-06-29"
 author: "Tristan Poland"
-tags: ["renderer", "wgpu", "rust", "helio", "profiling", "gpu", "debug", "optimization"]
+tags: ["rust", "helio", "optimization", "editor", "pulsar"]
 description: "A thorough technical walkthrough of how Helio's built-in profiler works — zero-instrumentation pass timing, GPU timestamp queries, resolve buffer mechanics, staging readback without stalling, and the live telemetry viewer that ties it all together."
 thumbnail: /post_thumb/profiler.png
 ---

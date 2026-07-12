@@ -2,7 +2,7 @@
 title: "The Pulsar Blueprint System: From the Blueprint Macro to Runtime Execution"
 date: "2026-07-14"
 author: "Tristan Poland"
-tags: ["rust", "blueprint", "visual-scripting", "game-engine", "bytecode", "reflection", "pulsar"]
+tags: ["rust", "game-engine", "blueprint", "reflection", "pulsar"]
 description: "A complete walkthrough of Pulsar's Blueprint visual scripting system — how the #[blueprint] macro transforms Rust functions into graph nodes, how the reflection system and component methods feed into the node palette, and how the dual-path execution runtime runs bytecode in the editor and transpiled Rust in shipping builds."
 thumbnail: /post_thumb/blueprint.png
 ---

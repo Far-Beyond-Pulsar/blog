@@ -11,7 +11,7 @@ thumbnail: /post_thumb/blueprint-compiler.png
 
 A blueprint graph in the editor is a visual thing — nodes with colored pins, bezier wires, collapsible comments, zoom-to-fit. You can drag nodes around, connect outputs to inputs, group regions into macros. It feels like a drawing tool. But every time you hit the compile button, that drawing is fed into an assembly line that transforms it into executable code with two possible outputs.
 
-This post follows that assembly line from end to end. It covers the Graphy library's representation of graphs, the type checker with its coercion system, the data flow analyzer, the execution router, the sub-graph expander, and the two code generators — bytecode and Rust. It is the companion to the [previous post](/posts/2026-07-14-pulsar-blueprint-executor), which covered the `#[blueprint]` macro, the component method system, and the dual-path execution runtime. Where that post followed the runtime path, this one follows the compile-time path.
+This post follows that assembly line from end to end. It covers the Graphy library's representation of graphs, the type checker with its coercion system, the data flow analyzer, the execution router, the sub-graph expander, and the two code generators — bytecode and Rust. It is the companion to the [previous post](/blog/2026-07-14-pulsar-blueprint-executor), which covered the `#[blueprint]` macro, the component method system, and the dual-path execution runtime. Where that post followed the runtime path, this one follows the compile-time path.
 
 The assembly line has five phases, implemented in the Pulsar Blueprint Graph Compiler (PBGC) and its underlying library, Graphy:
 

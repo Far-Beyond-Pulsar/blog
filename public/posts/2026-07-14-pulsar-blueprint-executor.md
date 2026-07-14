@@ -15,9 +15,9 @@ Pulsar approaches the problem differently. Not by choosing between flexibility a
 
 This is the blueprint system.
 
-It sits on top of the reflection infrastructure we covered in the [previous post](/2026-06-26-pulsar-reflection-system). The `RuntimeTypeInfo` that powers the property panel is the same type information that validates blueprint pin connections. The `EngineClass` that auto-generates property editors is the same trait that component methods register against. The `Reflectable` derive that gives your structs serialization is the same trait that lets blueprint nodes pass complex types across wires. Everything connects.
+It sits on top of the reflection infrastructure we covered in the [previous post](/blog/2026-06-26-pulsar-reflection-system). The `RuntimeTypeInfo` that powers the property panel is the same type information that validates blueprint pin connections. The `EngineClass` that auto-generates property editors is the same trait that component methods register against. The `Reflectable` derive that gives your structs serialization is the same trait that lets blueprint nodes pass complex types across wires. Everything connects.
 
-This post covers the full stack: from the `#[blueprint]` macro that turns Rust functions into graph nodes, through the standard library of built-in nodes, through the component method system that exposes component APIs to visual scripting, down to the dual-path execution runtime that runs bytecode in the editor and transpiled Rust in shipping builds. The companion post — [Pulsar's Blueprint Compiler: Graphs, Types, and Transpilation](/2026-07-16-pulsar-blueprint-compiler) — goes deep into the graph compilation pipeline, type checking, bytecode generation, Rust codegen, and project assembly.
+This post covers the full stack: from the `#[blueprint]` macro that turns Rust functions into graph nodes, through the standard library of built-in nodes, through the component method system that exposes component APIs to visual scripting, down to the dual-path execution runtime that runs bytecode in the editor and transpiled Rust in shipping builds. The companion post — [Pulsar's Blueprint Compiler: Graphs, Types, and Transpilation](/blog/2026-07-16-pulsar-blueprint-compiler) — goes deep into the graph compilation pipeline, type checking, bytecode generation, Rust codegen, and project assembly.
 
 ---
 

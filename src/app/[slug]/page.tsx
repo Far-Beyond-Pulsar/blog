@@ -1,7 +1,10 @@
 import { notFound } from 'next/navigation';
 import { getBlogIndex, getPostMeta, getPostContent, extractHeadings } from '@/utils/blog';
+import { getAuthors } from '@/utils/authors';
 import BlogMarkdown from '@/components/BlogMarkdown';
 import TableOfContents from '@/components/TableOfContents';
+import AuthorAvatars from '@/components/AuthorAvatars';
+import AuthorFooter from '@/components/AuthorFooter';
 
 const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || '';
 
@@ -42,6 +45,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   if (!meta || content === null) notFound();
 
   const headings = extractHeadings(content);
+  const authorList = getAuthors(meta.author || 'Pulsar Team');
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -94,7 +98,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
           )}
 
           <div className="flex items-center gap-3 text-sm text-white/40">
-            <span className="font-medium text-white/60">{meta.author}</span>
+            <AuthorAvatars authors={authorList} />
             <span>·</span>
             <time>{formatDate(meta.date)}</time>
             <span>·</span>
@@ -111,8 +115,11 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
           <div className="flex-1 min-w-0">
             <BlogMarkdown content={content} />
 
+            {/* Author details */}
+            <AuthorFooter authors={authorList} />
+
             {/* Footer nav */}
-            <div className="mt-16 pt-8 border-t border-white/[0.07] flex items-center justify-between">
+            <div className="mt-10 pt-8 border-t border-white/[0.07] flex items-center justify-between">
               <a
                 href={`${BASE}/`}
                 className="text-sm text-white/40 hover:text-white/70 transition-colors"

@@ -1,7 +1,7 @@
 ---
 title: "Tiled Light Culling: From Linear Scan to Forward+"
 date: "2026-06-29"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "helio", "graphics", "optimization", "pulsar"]
 description: "A technical walkthrough of Helio's tile-based light culling system — how we replaced a linear per-pixel light scan with a compute shader that assigns lights to 16x16 tiles, the tile frustum construction, the cache key that makes it free on static scenes, and what 1000+ dynamic lights look like in practice."
 thumbnail: /post_thumb/light_cull.png

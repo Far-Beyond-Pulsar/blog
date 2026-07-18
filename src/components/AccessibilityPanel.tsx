@@ -87,9 +87,14 @@ function applySettings(s: AccessibilitySettings) {
   // ── High contrast ──
   if (s.highContrast) {
     injectStyle('a11y-contrast', `
-      html { filter: contrast(1.5) !important; }
+      html {
+        filter: brightness(1.1);
+      }
       a, a * { color: #7dd3fc !important; }
-      code, pre { background: #111 !important; color: #fff !important; border-color: rgba(255,255,255,0.3) !important; }
+      code, pre {
+        background: #111 !important;
+        border-color: rgba(255,255,255,0.35) !important;
+      }
     `);
   } else {
     removeStyle('a11y-contrast');

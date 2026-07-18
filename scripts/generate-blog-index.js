@@ -7,11 +7,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const readingTime = require('reading-time');
 
 const postsDir = path.join(process.cwd(), 'public/posts');
 const indexFile = path.join(process.cwd(), 'public/blog-index.json');
 const previewFile = path.join(process.cwd(), 'public/blog-preview.json');
 const allFile = path.join(process.cwd(), 'public/blog-all.json');
+const authorsFile = path.join(process.cwd(), 'public/authors.json');
 
 // Minimal frontmatter parser (avoids requiring gray-matter at build-script level via CJS)
 function parseFrontmatter(raw) {
@@ -39,11 +41,6 @@ function parseFrontmatter(raw) {
   }
 
   return { data, content: match[2] };
-}
-
-function readingTime(text) {
-  const words = text.trim().split(/\s+/).length;
-  return Math.max(1, Math.round(words / 200));
 }
 
 function excerpt(content, length = 200) {
@@ -76,14 +73,23 @@ for (const file of files) {
     thumbnail = BASE + thumbnail;
   }
 
+  // Resolve author data from cache
+  let authorsCache = {};
+  try { authorsCache = JSON.parse(fs.readFileSync(authorsFile, 'utf-8')); } catch {}
+  const rawAuthors = Array.isArray(data.author) ? data.author : (data.author ? [data.author] : []);
+  const authorData = rawAuthors.map(u => authorsCache[u] || { login: u, name: u, avatar_url: '', html_url: `https://github.com/${u}`, bio: '' }).filter(a => a.login);
+
+  const rt = readingTime(content);
   posts.push({
     slug,
     title: data.title || slug,
     date: data.date || '',
-    author: data.author || 'Pulsar Team',
+    author: rawAuthors,
+    authorData,
     tags: Array.isArray(data.tags) ? data.tags : data.tags ? [data.tags] : [],
     description: data.description || excerpt(content),
-    readingTime: readingTime(content),
+    readingTime: Math.max(1, Math.round(rt.minutes)),
+    wordCount: rt.words,
     thumbnail,
     draft: data.draft === 'true',
   });
@@ -103,6 +109,17 @@ const allTags = Object.keys(tagCounts).sort((a, b) => {
   const diff = tagCounts[b] - tagCounts[a];
   return diff !== 0 ? diff : a.localeCompare(b);
 });
+
+// Collect all unique authors with post counts
+const authorCounts = {};
+for (const p of published) {
+  for (const a of (p.authorData || [])) {
+    const key = a.login;
+    if (!authorCounts[key]) authorCounts[key] = { ...a, count: 0 };
+    authorCounts[key].count++;
+  }
+}
+const allAuthors = Object.values(authorCounts).sort((a, b) => b.count - a.count);
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || '';
 const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || '';
@@ -124,6 +141,7 @@ const externalPosts = published.map(p => ({
   tags: p.tags,
   description: p.description,
   readingTime: p.readingTime,
+  wordCount: p.wordCount,
   thumbnail: resolveUrl(p.thumbnail),
   draft: p.draft,
 }));
@@ -132,6 +150,7 @@ const index = {
   posts: published,
   allTags,
   tagFreq: tagCounts,
+  allAuthors,
   total: published.length,
   generated: new Date().toISOString(),
 };

@@ -1,7 +1,7 @@
 ---
 title: "Cascaded Shadow Maps: From Matrix Compute to PCSS Filtering"
 date: "2026-06-29"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "helio", "graphics", "optimization", "pulsar"]
 description: "A complete walkthrough of Helio's shadow pipeline — GPU matrix generation for point/directional/spot lights, the 256-layer shadow atlas with GPU-driven dirty tracking, per-face frustum culling, and PCSS soft shadows with Vogel disk sampling."
 thumbnail: /post_thumb/shadows.png

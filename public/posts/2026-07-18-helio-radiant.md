@@ -1,7 +1,7 @@
 ---
 title: "Helio Radiant: Zero-Cost Custom Materials Through Template Fusion"
 date: "2026-07-18"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "helio", "graphics", "materials", "architecture", "pulsar"]
 description: "How Helio's Radiant material system combines hand-authored shader templates with graph-generated WGSL snippets to deliver custom surface shaders with zero per-permutation PSO cost — through warp-uniform feature branches, lazy shader compilation, and draw-call grouping by material class."
 thumbnail: /post_thumb/radiant.png

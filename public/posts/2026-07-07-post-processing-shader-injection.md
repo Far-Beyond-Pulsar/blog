@@ -1,7 +1,7 @@
 ---
 title: "Post Processing and Custom Shader Injection in Helio"
 date: "2026-07-07"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "helio", "graphics", "editor", "pulsar"]
 description: "How Helio handles post processing — the uber-pass design, multi-point shader injection, GPU volume blending, auto-exposure, bloom, color grading, and the post-process volume system with GPU-side spatial blending."
 thumbnail: /post_thumb/post_processing.png

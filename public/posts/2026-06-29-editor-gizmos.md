@@ -1,7 +1,7 @@
 ---
 title: "Editor Gizmos: 3D Transform Manipulation in Rust"
 date: "2026-06-29"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "helio", "editor", "ui", "pulsar"]
 description: "A technical walkthrough of Helio's editor gizmo system — how translate/rotate/scale handles work, the ray intersection picking for handle selection, the axis-aligned rendering, and how everything integrates with the debug draw pipeline for zero-cost editor visualization."
 thumbnail: /post_thumb/gizmos.png

@@ -1,7 +1,7 @@
 ---
 title: "Corona: Building a GPU-Native Particle System"
 date: "2026-06-26"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "helio", "graphics", "optimization", "pulsar"]
 description: "A full technical walkthrough of Corona — Helio's GPU-native particle system. How we went from invisible particles and flickering garbage to a million stable, depth-sorted, atlas-rendered particles using prefix sums, bitonic sort, and a lot of debugging."
 thumbnail: /post_thumb/corona.png

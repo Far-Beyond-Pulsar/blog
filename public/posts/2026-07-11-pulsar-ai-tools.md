@@ -1,7 +1,7 @@
 ---
 title: "The AI in the Machine: AI Tools and Context at Scale"
 date: "2026-07-11"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "game-engine", "ai", "architecture", "pulsar"]
 description: "How Pulsar's plugin-driven AI system lets the agent discover, traverse, and invoke tools through a macro-based pipeline — without dumping your entire codebase into a system prompt."
 thumbnail: /post_thumb/agent_chat.png

@@ -11,13 +11,14 @@ const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || "";
 const VISIBLE_TAGS = 10;
 
 export default function BlogHome() {
-  const { posts, allTags, tagFreq, total } = getBlogIndex();
+  const { posts, allTags, tagFreq, allAuthors, total } = getBlogIndex();
 
   return (
     <BlogHomeClient
       posts={posts}
       allTags={allTags}
       tagFreq={tagFreq}
+      allAuthors={allAuthors || []}
       total={total}
       base={BASE}
       visibleTags={VISIBLE_TAGS}

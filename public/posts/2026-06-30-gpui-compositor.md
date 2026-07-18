@@ -1,7 +1,7 @@
 ---
 title: "Making GPUI Fast: A Compositor Thread, an Overscroll Buffer, and Why Browsers Don't Re-Render on Scroll"
 date: "2026-06-30"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "ui", "architecture", "optimization", "pulsar"]
 description: "How we're planning to pull a CoreAnimation-style compositor thread and a browser-inspired overscroll buffer into GPUI to move essentially all rendering work off the main thread — and why scrolling a massive list should cost near-zero CPU time."
 thumbnail: /post_thumb/gpui_compositor.png

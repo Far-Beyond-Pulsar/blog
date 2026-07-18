@@ -1,7 +1,7 @@
 ---
 title: "EngineFS: Pulsar's Virtual Filesystem Layer"
 date: "2026-06-26"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "game-engine", "architecture", "filesystem", "pulsar"]
 description: "How Pulsar abstracts every file operation behind a swappable provider trait — making local disk, HTTP remote, and P2P collaborative sessions all look identical to every crate above them."
 thumbnail: /post_thumb/engine_fs.png

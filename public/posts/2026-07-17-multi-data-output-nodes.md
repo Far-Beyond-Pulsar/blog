@@ -1,7 +1,7 @@
 ---
 title: "Multi-Data-Output Nodes — One Binding, Many Pins"
 date: "2026-07-17"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["graphy", "psgc", "pbgc", "pulsar", "shaders", "blueprint", "compiler", "wgsl", "rust"]
 description: "How Pulsar's node graph compilers handle nodes that produce multiple values — the cross-language accessor pattern, compiler internals, and the #[output] / bp_return! macros."
 thumbnail: /post_thumb/multi_output.png

@@ -9,7 +9,8 @@
     "lint": "next lint",
     "prebuild": "npm run generate:index",
     "predev": "npm run generate:index",
-    "generate:index": "node scripts/generate-blog-index.js"
+    "generate:index": "node scripts/fetch-authors.js && node scripts/generate-blog-index.js",
+    "fetch:authors": "node scripts/fetch-authors.js"
   },
   "dependencies": {
     "@fontsource/opendyslexic": "^5.2.5",
@@ -22,6 +23,7 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-markdown": "^10.1.0",
+    "reading-time": "^1.5.0",
     "rehype-highlight": "^7.0.2",
     "rehype-katex": "^7.0.1",
     "rehype-raw": "^7.0.0",

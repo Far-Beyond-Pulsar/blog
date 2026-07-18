@@ -1,7 +1,7 @@
 ---
 title: "Helio Fusor: How the Executor Took Ownership of the Render Pass and Why Nobody Noticed"
 date: "2026-07-07"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "helio", "graphics", "architecture", "pulsar"]
 description: "How Helio's Fusor system fuses adjacent render passes into a single GPU render pass — why the executor, not the passes, owns the render pass lifecycle, how passes write to a pointer they don't own, and what this saves on Vulkan, Metal, DX12, and WebGPU."
 thumbnail: /post_thumb/fusor.png

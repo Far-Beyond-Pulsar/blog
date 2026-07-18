@@ -1,7 +1,7 @@
 ---
 title: "Culling Done Right: Fixing What Everyone Gets Wrong About GPU Culling"
 date: "2026-06-29"
-author: "Tristan Poland"
+author: ["tristanpoland"]
 tags: ["rust", "helio", "graphics", "optimization", "pulsar"]
 description: "A deep technical postmortem of Helio's culling system — the critical bugs that caused objects to vanish when they shouldn't and appear when they shouldn't, the fixes that brought everything inline with AAA standards, and what a 110% occlusion-culled stat taught us about atomic counter races."
 thumbnail: /post_thumb/culling.png

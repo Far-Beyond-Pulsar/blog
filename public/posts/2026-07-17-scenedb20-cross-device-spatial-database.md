@@ -68,6 +68,12 @@ frame whether 100 or 100,000 objects moved. The renderer has no way to know what
 changed because it does not own the data. It owns a copy it must refresh in its
 entirety or risk staleness.
 
+> [!NOTE]
+> The push-model is not inherently wrong. At small entity counts the overhead
+> is negligible. The problem is that it does not scale — the cost is O(entities)
+> per frame regardless of how few entities changed. SceneDB replaces this with
+> a cost proportional to the number of mutations, not the total scene size.
+
 Each subsystem solves this problem in isolation. Physics builds an incremental
 broadphase in its own memory, invisible to the renderer. The editor reads the
 game thread's arrays directly, coupling itself to a single consumer's layout.
@@ -217,6 +223,13 @@ SceneDB's GPU buffers outlive any renderer instance, so the `Device` and
 SceneDB allocates scene buffers on that shared context. Helio binds them.
 Dropping Helio drops nothing that belongs to the scene.
 
+> [!NOTE]
+> The Ownership Law means SceneDB owns the GPU buffers, not Helio. If Helio
+> crashes or is hot-reloaded, the scene data survives. The GPU device context
+> lives above both systems and is shared by reference. Dropping Helio never
+> drops a scene buffer. Test 13 verifies this: drop Helio mid-frame, rebuild
+> it, zero bytes re-uploaded.
+
 This is not an organizational preference. It is the enabling condition for
 three capabilities that the legacy architecture could not deliver.
 
@@ -360,6 +373,13 @@ generation. No pointer chasing, no heap allocation, no type erasure. The same
 value that the CPU passes into `CellStorage::row_of` is the same value a shader
 loads from the slot-mirror SSBO to index into the transform buffer. One index
 space, both sides.
+
+> [!TIP]
+> Test handle validity with `handle.is_valid()` rather than comparing against
+> `Handle::INVALID`. The method checks `generation() != 0`, which covers both
+> the zero-initialised case and any handle whose generation was never set.
+> Comparing against `INVALID` misses the case where a partially-written handle
+> has a zero generation but a nonzero slot index — `is_valid()` catches it.
 
 ```rust
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -510,6 +530,14 @@ allocation exclusively. All access goes through `&self` or `&mut self` on the
 containing `CellStorage`, so Rust's borrow rules prevent aliasing. A `Page`
 moved between threads between frames is fine. A `Page` accessed from two
 threads simultaneously is caught by the borrow checker before it compiles.
+
+> [!IMPORTANT]
+> Column 0 is always the slot ID column (`u32`). User columns start at index 1.
+> The slot column is declared implicitly by `CellStorage` and never appears in
+> the `ColumnDesc` list passed to `Page::new`. Accessing user column 0 when you
+> meant the first data column reads the slot IDs instead. Always use
+> `column_for::<T>()` with a `TypeToken` for token-safe access, or add 1 to
+> the positional index when using `user_column::<T>()` directly.
 
 Typed column access on `Page` works through `column_slice::<T>(col)` and
 `column_slice_mut::<T>(col)`. Each call checks that the element size in the
@@ -792,6 +820,11 @@ of the simulation phase and an Acquire fence at the start of the harvest phase.
 The fences are owned by `pulsar_scenedb::gpu::phase`. Any caller that drives a
 frame through that phase machine gets correct visibility for free.
 
+> [!TIP]
+> The `Relaxed` ordering on liveness mask atomics is safe because the phase
+> machine provides the happens-before edge. Without it, a relaxed read could
+> see a stale liveness value from another thread.
+
 ```rust
 pub fn set_live(&self, row: u32) {
   self.words[(row / 64) as usize].fetch_or(1u64 << (row % 64), Ordering::Relaxed);
@@ -893,6 +926,13 @@ for the page.
 The registry owns the slot table. Every handle resolves through it. The registry
 is the authority on which slots are live, which row each live slot occupies, and
 what generation each slot is at.
+
+```rust
+> [!CAUTION]
+> A slot whose generation reaches `u32::MAX` is permanently retired. The slot
+> is never recycled — the handle is dead forever. In practice this requires
+> 4.3 billion allocate-free cycles on the same slot index. The retirement is
+> an absolute bound on handle aliasing, not a realistic failure mode.
 
 ```rust
 pub struct HandleRegistry {
@@ -1796,6 +1836,14 @@ fn migrate_row_skip(
 }
 ```
 
+> [!WARNING]
+> Migration cost scales with the entity's current component count, not the
+> destination size. An entity with 12 components that gains one more pays for
+> 12 `swap_remove_erased` calls, 12 box-and-leak allocations, and 12
+> `push_erased` calls. The per-component cost is fixed, so entities with many
+> components are proportionally more expensive to migrate. Batch component
+> additions where possible to amortise the migration overhead.
+
 The `remove` path uses this: the removed component's value is already extracted before migration begins. All other components follow the same transfer path.
 
 The slot update happens last, after all data has been transferred and the source row has been vacated. If the migration panics between the entity push and the slot update, the entity exists in two archetypes simultaneously with inconsistent slot data. The `debug_assertions` build catches this with `assert_archetype_consistency`, which verifies that every archetype's column lengths match its entity count. Release builds skip the assertion.
@@ -1814,6 +1862,76 @@ Each migration also incurs the erased column overhead. Every component on the en
 The `remove` path has an additional cost. The removed component value is extracted via `swap_remove_erased` before migration begins. The value is unboxed and returned to the caller as `Option<T>`. If the caller discards the value, the drop runs normally. If the caller stores it, no extra copy occurs.
 
 These benchmarks were measured on an AMD Ryzen 9 7950X at stock clocks. The criterion configuration uses the default profiling overhead measurement and a target coefficient of variation under 5%. All measurements are wall-clock time. Each benchmark runs until the confidence interval stabilizes.
+
+### 2.6 Defining components with SceneComponent
+
+A component that needs editor properties and GPU mirroring is declared with a single derive.
+
+```rust
+#[derive(SceneComponent)]
+#[engine_class(category = "Physics", default, clone)]
+pub struct RigidBody {
+    #[property]
+    #[gpu]
+    pub transform: [f32; 16],
+
+    #[property]
+    #[gpu]
+    pub instance_info: InstanceInfo,
+
+    #[property]
+    pub mass: f32,
+
+    #[property]
+    pub linear_velocity: [f32; 3],
+}
+```
+
+`#[derive(SceneComponent)]` composes three concerns. `#[derive(Reflectable)]` generates
+runtime type metadata with field names, types, and byte offsets for serialization.
+`#[engine_class(...)]` registers the component with the reflection system — each
+`#[property]` field gets a getter, setter, and type info for the UI. `#[derive(SceneStore)]`
+makes `Pod`, `CellType`, and `GpuColumnSet` — every field becomes a column in SceneDB
+storage, and each `#[gpu]` field gets a GPU-resident buffer that the CPU writes into at the frame boundary.
+
+GPU-native fields live resident on the device. The CPU side never reads them back.
+Updates arrive as events from the simulation phase — a transform change, a mesh swap,
+a material override. Each event writes the new value into the CPU-side column and
+marks the row dirty. At the frame boundary, `sync_all` coalesces the dirty marks into
+contiguous ranges and issues one `write_buffer` per range. The GPU sees the new values
+on the next dispatch. Zero CPU-side reads of GPU data.
+
+The `GpuColumnSet` descriptor list drives this at registration time. Every `#[gpu]`
+field gets a `DirtyMask` slice in the per-cell state, a `SceneBuffer<T>` region in
+the store, and a slot in the descriptor table. `write_gpu::<RigidBody>()` dispatches
+each field to its column write and dirty mark. The boundary scan reads the same
+descriptor entries to know which buffers to scan. Any `Pod` type can be a `#[gpu]`
+field. No code outside SceneDB needs to know about the sync path.
+
+GPU-native fields are immutable on the GPU between boundaries — the shader reads them,
+the CPU queues updates, and the boundary applies them. This means a `#[gpu]` field
+read in the middle of a frame reflects the previous boundary's state. Frame-level
+latency is the expected contract. Eventual consistency, not immediate.
+
+> [!NOTE]
+> Zero dirty rows produce zero GPU writes. The boundary scan checks each
+> `DirtyMask` before issuing uploads. In the steady state nothing changes
+> between frames and the scan exits without a single `write_buffer` call.
+> The slot-mirror scan still runs every frame (u32 compare per row), but
+> at 100,000 rows that takes a few microseconds — no device-side work.
+
+> [!CAUTION]
+> A `#[gpu]` field written during simulation is invisible to the GPU until the next
+> boundary. Reading it back on the CPU side after writing returns the new value (the
+> CPU column is updated immediately), but the GPU sees the old value until the frame
+> boundary flush. Cross-device read-after-write in the same frame reads stale GPU data.
+> If a shader must see the write in the same frame, do not use `#[gpu]` — use a
+> CPU-only field and an explicit `write_buffer` upload instead.
+>
+> A `#[gpu]` field written twice in the same frame coalesces: only the last write
+> survives to the boundary. If the GPU must see every intermediate value (e.g. a
+> transform animation sampled at sub-frame timing), batch the writes on the CPU and
+> upload the final value once.
 
 ## 3. GPU Layer
 
@@ -1951,6 +2069,14 @@ Frame phases are types, not runtime values. `SimulateA` and `SimulateB` permit m
 Mutation APIs like `write_transform` take `&impl SimulateWitness`. A `HarvestPhase` reference does not implement the trait. Calling `write_transform` with a harvest-phase witness is a compile error.
 
 Each transition consumes the witness. `SimulateA::end` returns `SimulateB`. `SimulateB::end` returns `HarvestPhase`. `HarvestPhase::end` returns `BoundaryPhase`. `BoundaryPhase::run` consumes itself. The only way to get a fresh `SimulateA` is through `FrameDriver::begin`.
+
+> [!WARNING]
+> The witness system prevents accidental misuse but does not prevent deliberate
+> hoarding. A caller who stores a `SimulateA` reference across a boundary can
+> mutate during the harvest window — the type system cannot catch it because
+> the reference is not lifetime-tied to the frame. An internal `Phase` enum
+> tracks the current phase at runtime and asserts on misuse in debug builds.
+> Release builds skip the check for performance.
 
 The memory ordering contract lives in the transitions. `SimulateB::end` emits a `Release` fence. `HarvestPhase::end` emits a paired `Acquire` fence. Single-threaded callers pay nothing -- the fence emits no instruction on x86-64 and only orders the thread's own stores.
 
@@ -2188,19 +2314,6 @@ The harvest pass runs after simulation on read-only data. It scans every cell's 
 The Density Efficiency Index selects between plain and DEI-compacted paths. When DEI drops below 0.25, a SIMD compress-store path replaces the plain filter-and-offset scan and appends a remap-table segment. The NULL_ROW sentinel is dropped before the offset addition in both paths.
 
 `HarvestStaging` is persistent across frames. Vecs are cleared but never deallocated. A decay policy prevents burst inflation: if peak usage over the last 8 frames stays below 50% of capacity, the buffer is halved.
-    let cap = self.u32_buf.len();
-    if cap > 0 && self.peak_this_window * 2 < cap {
-      let new_cap = cap / 2;
-      self.u32_buf.truncate(new_cap);
-      self.u32_buf.shrink_to_fit();
-    }
-    // same for u64_buf
-    self.frames_in_window = 0;
-    self.peak_this_window = 0;
-    self.peak_u64_this_window = 0;
-  }
-}
-```
 
 `ViewTokenBuffers` is the device-side landing point for the staging arrays. It owns two SSBOs per class -- one for tokens, one for expected generations. It grows on demand with a 1.5x factor and never shrinks. Upload issues two `write_buffer` calls per non-empty class column.
 
@@ -2322,6 +2435,12 @@ The alloc gate tests in `tests/alloc_gate_gpu.rs` verify that every GPU upload p
 Together these pieces form the substrate that Helio's shaders bind against. The SSBOs are the contract between the CPU and the GPU, one index space, one handle format, one set of generation-validated slots.
 
 Part 4 covers how this contract survives across languages, backends, and device lifetimes.
+
+> [!TIP]
+> The `gpu` feature does not pull in Helio or any renderer code.
+> `cargo tree -p pulsar_scenedb --no-default-features | grep helio`
+> returns nothing. This is enforced in CI. You can build and test the storage
+> layer on a headless server or a CI runner with no GPU at all.
 
 ## 4.1 One crate, two configurations
 

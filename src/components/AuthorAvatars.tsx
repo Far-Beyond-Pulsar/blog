@@ -72,7 +72,7 @@ export default function AuthorAvatars({ authors }: { authors: Author[] }) {
                 <div
                   ref={tooltipRef}
                   className="absolute z-50 px-3 py-2 bg-[#1a1a1a] border border-white/[0.07] rounded-lg shadow-xl pointer-events-none backdrop-blur-sm"
-                  style={{ left: '50%', transform: 'translateX(-50%)', top: 'calc(100% + 8px)' }}
+                  style={{ left: '50%', transform: 'translateX(-50%)', bottom: 'calc(100% + 8px)' }}
                 >
                   <div className="flex items-center gap-2.5">
                     <img src={author.avatar_url} alt="" width={22} height={22} className="rounded-full w-5.5 h-5.5 shrink-0 ring-1 ring-white/10" />
@@ -84,7 +84,7 @@ export default function AuthorAvatars({ authors }: { authors: Author[] }) {
                     </div>
                   </div>
                   <div
-                    className="absolute w-2 h-2 bg-[#1a1a1a] border-l border-t border-white/[0.07] rotate-45"
+                    className="absolute w-2 h-2 bg-[#1a1a1a] border-r border-b border-white/[0.07] rotate-45"
                     style={{ left: '50%', marginLeft: -4, bottom: -5 }}
                   />
                 </div>

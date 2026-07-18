@@ -139,7 +139,9 @@ maintain a dirty flag per entry that the renderer polls, coupling the renderer
 to the ECS's internal tracking while still requiring a full iteration to collect
 the dirty set. Both paths add complexity without resolving the fundamental
 issue: the data lives in one address space and is consumed in another, and they
-are owned by different systems. SceneDB 2.0 replaces both with a single shared
+are owned by different systems.
+
+SceneDB 2.0 replaces both with a single shared
 index space and byte-identical CPU/GPU storage layouts. The old ECS allocated
 GPU data as a separate concern with no shared layout. The renderer defined its
 own transform buffer format, its own mesh metadata, its own material data. The
@@ -183,11 +185,14 @@ the indices that serve every consumer including the renderer hot loop.
 
 **Helio owns no scene state.**
 
-Helio is a stateless consumer. It owns only renderer-internal derived data:
-pipelines, shaders, the Hi-Z pyramid it builds each frame, framebuffers, render
-targets, transient draw-command and task payload scratch buffers. Everything
-except the scene object data. It binds SceneDB-owned buffers and runs passes
-over them. It never holds an authoritative copy of scene state.
+Helio owns renderer-internal persistent data. Pipelines, shaders, shadow
+atlases, the Hi-Z pyramid, framebuffers, render targets, draw-command and task
+payload scratch buffers, and every other GPU resource the renderer needs
+between frames. This includes per-frame transient allocations and long-lived
+structures like shadow atlas textures. What Helio does not own is the
+authoritative scene object data. Transforms, mesh registries, generation
+buffers, and slot mirrors belong to SceneDB. Helio binds SceneDB-owned buffers
+and runs passes over them. The scene state lives in one place.
 
 ```rust
 // Helio binds SceneDB buffers, it does not own them

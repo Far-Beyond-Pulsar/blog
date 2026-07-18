@@ -17,24 +17,40 @@ const MonacoCodeBlock = dynamic(() => import('./MonacoCodeBlock'), {
   loading: () => null,
 });
 
+// Suppress mermaid/Monaco cancelation errors in Strict Mode
+if (typeof window !== 'undefined') {
+  const orig = window.onunhandledrejection;
+  window.addEventListener('unhandledrejection', (e) => {
+    const err = e.reason;
+    if (err && typeof err === 'object' && err.type === 'cancelation') {
+      e.preventDefault();
+    }
+  });
+}
+
+let mermaidPromise: Promise<any> | null = null;
+
 function MermaidBlock({ code }: { code: string }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    import('mermaid').then(({ default: mermaid }) => {
-      if (cancelled || !ref.current) return;
+    if (!ref.current) return;
+    let el = ref.current;
+
+    if (!mermaidPromise) {
+      mermaidPromise = import('mermaid').then(m => (m as any).default || m);
+    }
+
+    mermaidPromise.then((mermaid: any) => {
+      if (!el.isConnected) return;
       mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true });
-      const id = `mermaid-${Math.random().toString(36).slice(2)}`;
-      mermaid.render(id, code).then(({ svg }) => {
-        if (ref.current && !cancelled) ref.current.innerHTML = svg;
-      }).catch(() => {
-        if (ref.current && !cancelled) {
-          ref.current.innerHTML = `<pre class="text-red-400 text-xs p-4">${code}</pre>`;
-        }
-      });
-    });
-    return () => { cancelled = true; };
+      const id = `m-${Math.random().toString(36).slice(2, 8)}`;
+      mermaid.render(id, code).then(({ svg }: any) => {
+        if (el.isConnected) el.innerHTML = svg;
+      }).catch(() => {});
+    }).catch(() => {});
+
+    return () => { el = null!; };
   }, [code]);
 
   return (

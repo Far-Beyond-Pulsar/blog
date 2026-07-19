@@ -36,6 +36,7 @@ function MermaidBlock({ code }: { code: string }) {
   const panRef = useRef({ x: 0, y: 0, scale: 1 });
   const imgRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ dragging: false, startX: 0, startY: 0, panX: 0, panY: 0 });
+  const svgRef = useRef('');
 
   useEffect(() => {
     if (!ref.current) return;
@@ -51,28 +52,27 @@ function MermaidBlock({ code }: { code: string }) {
       const id = `m-${Math.random().toString(36).slice(2, 8)}`;
       mermaid.render(id, code).then(({ svg }: any) => {
         if (el.isConnected) el.innerHTML = svg;
+        svgRef.current = svg;
       }).catch(() => {});
     }).catch(() => {});
 
     return () => { el = null!; };
   }, [code]);
 
-  // Clone the SVG into the fullscreen overlay and lock body scroll
+  // Lock body scroll and render the SVG in the overlay
   useEffect(() => {
     if (!fullscreen) {
       document.body.style.overflow = '';
       return;
     }
     document.body.style.overflow = 'hidden';
-    const svg = ref.current?.querySelector('svg');
-    if (svg && imgRef.current) {
-      const clone = svg.cloneNode(true) as SVGSVGElement;
-      clone.removeAttribute('width');
-      clone.removeAttribute('height');
-      clone.style.maxWidth = 'none';
-      clone.style.maxHeight = 'none';
-      imgRef.current.innerHTML = '';
-      imgRef.current.appendChild(clone);
+    if (imgRef.current && svgRef.current) {
+      const cleaned = svgRef.current
+        .replace(/\s+width="[^"]*"/, '')
+        .replace(/\s+height="[^"]*"/, '')
+        .replace(/\s+style="[^"]*"/, '')
+        .replace('<svg', '<svg style="width:90vw;height:90vh"');
+      imgRef.current.innerHTML = cleaned;
     }
     return () => { document.body.style.overflow = ''; };
   }, [fullscreen]);

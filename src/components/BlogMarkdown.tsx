@@ -35,6 +35,7 @@ function MermaidBlock({ code }: { code: string }) {
   const [fullscreen, setFullscreen] = useState(false);
   const panRef = useRef({ x: 0, y: 0, scale: 1 });
   const imgRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ dragging: false, startX: 0, startY: 0, panX: 0, panY: 0 });
   const svgRef = useRef('');
 
@@ -74,36 +75,50 @@ function MermaidBlock({ code }: { code: string }) {
         .replace('<svg', '<svg style="width:90vw;height:90vh"');
       imgRef.current.innerHTML = cleaned;
     }
-    return () => { document.body.style.overflow = ''; };
   }, [fullscreen]);
 
-  const openFullscreen = () => {
-    panRef.current = { x: 0, y: 0, scale: 1 };
-    dragRef.current.panX = 0;
-    dragRef.current.panY = 0;
-    setFullscreen(true);
-  };
+  // Native event listeners for zoom and pan on the overlay
+  useEffect(() => {
+    if (!fullscreen || !overlayRef.current) return;
+    const el = overlayRef.current;
 
-  const handleWheel = (e: React.WheelEvent) => {
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    panRef.current.scale = Math.min(Math.max(panRef.current.scale * delta, 0.25), 8);
-    applyTransform();
-  };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      panRef.current.scale = Math.min(Math.max(panRef.current.scale * delta, 0.25), 8);
+      applyTransform();
+    };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    dragRef.current.dragging = true;
-    dragRef.current.startX = e.clientX - dragRef.current.panX;
-    dragRef.current.startY = e.clientY - dragRef.current.panY;
-  };
+    const onPointerDown = (e: PointerEvent) => {
+      dragRef.current.dragging = true;
+      dragRef.current.startX = e.clientX - dragRef.current.panX;
+      dragRef.current.startY = e.clientY - dragRef.current.panY;
+      el.setPointerCapture(e.pointerId);
+    };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!dragRef.current.dragging) return;
-    dragRef.current.panX = e.clientX - dragRef.current.startX;
-    dragRef.current.panY = e.clientY - dragRef.current.startY;
-    applyTransform();
-  };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!dragRef.current.dragging) return;
+      dragRef.current.panX = e.clientX - dragRef.current.startX;
+      dragRef.current.panY = e.clientY - dragRef.current.startY;
+      applyTransform();
+    };
 
-  const handleMouseUp = () => { dragRef.current.dragging = false; };
+    const onPointerUp = () => { dragRef.current.dragging = false; };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('pointerdown', onPointerDown);
+    el.addEventListener('pointermove', onPointerMove);
+    el.addEventListener('pointerup', onPointerUp);
+    el.addEventListener('pointerleave', onPointerUp);
+
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('pointerdown', onPointerDown);
+      el.removeEventListener('pointermove', onPointerMove);
+      el.removeEventListener('pointerup', onPointerUp);
+      el.removeEventListener('pointerleave', onPointerUp);
+    };
+  }, [fullscreen]);
 
   const applyTransform = () => {
     if (imgRef.current) {
@@ -128,7 +143,12 @@ function MermaidBlock({ code }: { code: string }) {
           className="my-6 flex justify-center bg-[#0a0a0a] border border-white/[0.07] rounded-xl p-6 overflow-x-auto"
         />
         <button
-          onClick={openFullscreen}
+          onClick={() => {
+            panRef.current = { x: 0, y: 0, scale: 1 };
+            dragRef.current.panX = 0;
+            dragRef.current.panY = 0;
+            setFullscreen(true);
+          }}
           className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity px-2.5 py-1 text-xs rounded bg-white/10 hover:bg-white/20 text-white/60 hover:text-white/90"
         >
           ⛶ Fullscreen
@@ -136,15 +156,9 @@ function MermaidBlock({ code }: { code: string }) {
       </div>
 
       {fullscreen && (
-        /* eslint-disable-next-line jsx-a11y/no-static-element-interactions */
         <div
-          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center overflow-hidden"
-          style={{ cursor: dragRef.current.dragging ? 'grabbing' : 'grab' }}
-          onWheel={handleWheel}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
+          ref={overlayRef}
+          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center overflow-hidden touch-none select-none"
         >
           <button
             onClick={() => setFullscreen(false)}
@@ -163,6 +177,7 @@ function MermaidBlock({ code }: { code: string }) {
           </div>
           <div
             ref={imgRef}
+            className="pointer-events-none"
             style={{ transform: 'translate(0px, 0px) scale(1)' }}
           />
         </div>

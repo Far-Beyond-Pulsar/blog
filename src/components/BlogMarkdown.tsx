@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -32,6 +32,10 @@ let mermaidPromise: Promise<any> | null = null;
 
 function MermaidBlock({ code }: { code: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const panRef = useRef({ x: 0, y: 0, scale: 1 });
+  const imgRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef({ dragging: false, startX: 0, startY: 0, panX: 0, panY: 0 });
 
   useEffect(() => {
     if (!ref.current) return;
@@ -53,11 +57,117 @@ function MermaidBlock({ code }: { code: string }) {
     return () => { el = null!; };
   }, [code]);
 
+  // Clone the SVG into the fullscreen overlay and lock body scroll
+  useEffect(() => {
+    if (!fullscreen) {
+      document.body.style.overflow = '';
+      return;
+    }
+    document.body.style.overflow = 'hidden';
+    const svg = ref.current?.querySelector('svg');
+    if (svg && imgRef.current) {
+      const clone = svg.cloneNode(true) as SVGSVGElement;
+      clone.removeAttribute('width');
+      clone.removeAttribute('height');
+      clone.style.maxWidth = 'none';
+      clone.style.maxHeight = 'none';
+      imgRef.current.innerHTML = '';
+      imgRef.current.appendChild(clone);
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [fullscreen]);
+
+  const openFullscreen = () => {
+    panRef.current = { x: 0, y: 0, scale: 1 };
+    dragRef.current.panX = 0;
+    dragRef.current.panY = 0;
+    setFullscreen(true);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    panRef.current.scale = Math.min(Math.max(panRef.current.scale * delta, 0.25), 8);
+    applyTransform();
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    dragRef.current.dragging = true;
+    dragRef.current.startX = e.clientX - dragRef.current.panX;
+    dragRef.current.startY = e.clientY - dragRef.current.panY;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!dragRef.current.dragging) return;
+    dragRef.current.panX = e.clientX - dragRef.current.startX;
+    dragRef.current.panY = e.clientY - dragRef.current.startY;
+    applyTransform();
+  };
+
+  const handleMouseUp = () => { dragRef.current.dragging = false; };
+
+  const applyTransform = () => {
+    if (imgRef.current) {
+      const { x, y } = dragRef.current;
+      const { scale } = panRef.current;
+      imgRef.current.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+    }
+  };
+
+  const resetView = () => {
+    panRef.current = { x: 0, y: 0, scale: 1 };
+    dragRef.current.panX = 0;
+    dragRef.current.panY = 0;
+    applyTransform();
+  };
+
   return (
-    <div
-      ref={ref}
-      className="my-6 flex justify-center bg-[#0a0a0a] border border-white/[0.07] rounded-xl p-6 overflow-x-auto"
-    />
+    <>
+      <div className="relative group">
+        <div
+          ref={ref}
+          className="my-6 flex justify-center bg-[#0a0a0a] border border-white/[0.07] rounded-xl p-6 overflow-x-auto"
+        />
+        <button
+          onClick={openFullscreen}
+          className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity px-2.5 py-1 text-xs rounded bg-white/10 hover:bg-white/20 text-white/60 hover:text-white/90"
+        >
+          ⛶ Fullscreen
+        </button>
+      </div>
+
+      {fullscreen && (
+        /* eslint-disable-next-line jsx-a11y/no-static-element-interactions */
+        <div
+          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center overflow-hidden"
+          style={{ cursor: dragRef.current.dragging ? 'grabbing' : 'grab' }}
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          <button
+            onClick={() => setFullscreen(false)}
+            className="absolute top-5 right-5 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-colors text-lg"
+          >
+            ✕
+          </button>
+          <button
+            onClick={resetView}
+            className="absolute bottom-5 right-5 z-10 px-3 py-1.5 text-xs rounded bg-white/10 hover:bg-white/20 text-white/60 hover:text-white/90 transition-colors"
+          >
+            Reset
+          </button>
+          <div className="absolute top-5 left-5 text-xs text-white/30 select-none pointer-events-none">
+            Scroll to zoom · Drag to pan
+          </div>
+          <div
+            ref={imgRef}
+            style={{ transform: 'translate(0px, 0px) scale(1)' }}
+          />
+        </div>
+      )}
+    </>
   );
 }
 

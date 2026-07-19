@@ -154,10 +154,8 @@ own transform buffer format, its own mesh metadata, its own material data. The
 sync code converted between two independently designed representations every
 frame. SceneDB 2.0 specifies both sides as a single byte-identical contract. The
 mesh metadata struct is 72 bytes on the CPU and 72 bytes on the GPU, with the
-same field offsets, the same alignment, the same padding. Test 3 compares every
-byte offset between the host Rust struct and the compiled WGSL shader struct and
-fails on any single-byte mismatch. The upload is a memcpy into a layout that is
-guaranteed identical to the source layout.
+same field offsets, the same alignment, the same padding. The upload is a memcpy
+into a layout that is guaranteed identical to the source layout.
 
 ```rust
 // Mesh metadata: same struct, same layout, both sides
@@ -227,8 +225,7 @@ Dropping Helio drops nothing that belongs to the scene.
 > The Ownership Law means SceneDB owns the GPU buffers, not Helio. If Helio
 > crashes or is hot-reloaded, the scene data survives. The GPU device context
 > lives above both systems and is shared by reference. Dropping Helio never
-> drops a scene buffer. Test 13 verifies this: drop Helio mid-frame, rebuild
-> it, zero bytes re-uploaded.
+> drops a scene buffer.
 
 This is not an organizational preference. It is the enabling condition for
 three capabilities that the legacy architecture could not deliver.
@@ -307,11 +304,6 @@ SceneDB allocated them and SceneDB still holds a reference. The only work
 performed on rebuild is recreation of Helio's derived resources: pipelines,
 Hi-Z, command scratch.
 
-Test 13 and Test 14 codify this as acceptance criteria. T13 drops Helio
-mid-frame and rebuilds it against the same SceneDB. T14 simulates full GPU
-device loss and re-materializes every buffer from SceneDB's CPU columns. Both
-pass without data loss or reload from disk.
-
 The same property enables multi-view rendering without per-view copies. Shadow
 cascades, reflection probes, stereo pairs. Each view runs against the same
 SceneDB buffers simultaneously. Each view writes into its own indirect command
@@ -346,9 +338,9 @@ boundary of cross-frame persistence. If it persists beyond a frame and
 represents something about the scene, SceneDB owns it. If it is computed from
 scene state and discarded at the end of the frame, Helio owns it.
 
-This is the architecture that SceneDB 2.0 builds on. Part 1 walks through the
-three-layer model that enforces the Ownership Law in the crate structure and
-the frame lifecycle.
+This is the architecture that SceneDB 2.0 builds on.
+
+## Part 1: Storage Primitives
 
 Before anything else in SceneDB 2.0 can work, there has to be a place to put
 bytes. A way to name what lives there, a way to find it again, a way to know
@@ -366,7 +358,7 @@ vocabulary between a CPU core writing a transform and a GPU wavefront reading
 it, such that both sides agree on which object they mean and where its data
 sits in memory. The answer is a 64-bit integer.
 
-## 1.1 Handles: 64 bits, one index space
+### 1.1 Handles: 64 bits, one index space
 
 A `Handle` is a `u64`. Thirty-two bits name the slot. Thirty-two bits name the
 generation. No pointer chasing, no heap allocation, no type erasure. The same
@@ -430,7 +422,7 @@ slot index from the handle, reads the generation from the VRAM validation
 buffer, and compares. `handle.bits()` exposes the raw `u64` for uniform upload
 with no struct padding or byte-order concerns.
 
-## 1.2 SoA pages and the page allocator
+### 1.2 SoA pages and the page allocator
 
 The page is the atomic storage unit. One contiguous heap allocation, 64-byte
 aligned, holding every column of a cell's data in SoA layout. `PageLayout`
@@ -571,7 +563,7 @@ Raw pointer access via `column_ptr` and `column_ptr_mut` is available for the
 SIMD scan engine and for the byte-wise `swap_rows` operation in the compaction
 path. These methods bypass the type check and are `pub(crate)`.
 
-## 1.3 CellStorage: rows, columns, and cell types
+### 1.3 CellStorage: rows, columns, and cell types
 
 `CellStorage` wires the page, the liveness mask, the handle registry, and the
 token-to-column index map into a single object. It is the public API for
@@ -800,7 +792,7 @@ Two convenience accessors bridge the storage layer to external callers.
 `rows_in_use` returns the physical row count before compaction: live rows plus
 not-yet-compacted dead rows.
 
-## 1.4 LivenessMask: bit-level row state tracking
+### 1.4 LivenessMask: bit-level row state tracking
 
 The liveness mask tracks which rows are alive and which are dead. One bit per
 row, packed into a `Vec<u64>`. The nth row's bit lives in word `n / 64` at
@@ -876,36 +868,6 @@ that machine gets correct visibility automatically. A caller that reads or
 writes a `LivenessMask` outside the phase machine (there are none in the
 crate today) must provide its own synchronization or risk observing stale bits.
 
-The concurrent test exercises this by marking all 1024 bits live from one
-thread, then spawning eight worker threads each marking a slice of rows dead.
-Thread join provides the happens-before that makes the final `live_count`
-observation well-defined. In production the phase barrier plays the same role.
-
-```rust
-#[test]
-fn concurrent_marking_is_safe() {
-  use std::sync::Arc;
-  let m = Arc::new(LivenessMask::new(1024));
-  for i in 0..1024 {
-    m.set_live(i);
-  }
-  let handles: Vec<_> = (0..8)
-    .map(|t| {
-      let m = Arc::clone(&m);
-      std::thread::spawn(move || {
-        for i in (t..1024).step_by(8) {
-          m.set_dead(i as u32);
-        }
-      })
-    })
-    .collect();
-  for h in handles {
-    h.join().unwrap();
-  }
-  assert_eq!(m.live_count(), 0);
-}
-```
-
 The `words()` method exposes the raw `AtomicU64` slice for GPU upload. The
 phase machine reads every word and packs the bits into a staging buffer sized
 to the cell's capacity. The GPU-side liveness texture or SSBO word array uses
@@ -921,7 +883,7 @@ directly uploadable. A 1024-row mask fits in 128 bytes. Two cache lines.
 The compaction scan reads both lines once and has the complete liveness state
 for the page.
 
-## 1.5 HandleRegistry: slot allocation and generation management
+### 1.5 HandleRegistry: slot allocation and generation management
 
 The registry owns the slot table. Every handle resolves through it. The registry
 is the authority on which slots are live, which row each live slot occupies, and
@@ -1087,7 +1049,7 @@ that the in-flight submission has completed. After `commit_retire`, the slot is
 available for reallocation and the new generation has been written to both the
 host registry and the VRAM validation buffer.
 
-## 1.6 Type-token-keyed column access
+### 1.6 Type-token-keyed column access
 
 Positional column access by index works but creates a fragile coupling. If the
 column layout changes, a new column inserted or the order rearranged, every
@@ -1933,7 +1895,7 @@ latency is the expected contract. Eventual consistency, not immediate.
 > transform animation sampled at sub-frame timing), batch the writes on the CPU and
 > upload the final value once.
 
-## 3. GPU Layer
+## Part 3: GPU Layer
 
 The GPU layer is where SceneDB earns its name. Everything upstream exists to feed this machine. The GPU store owns persistent device buffers that outlive any renderer instance. The phase machine enforces that mutation and read-only access never overlap. The harvest pipeline scans every live cell and produces the exact byte sequences the shaders need for indirect draw dispatch.
 
@@ -2104,21 +2066,6 @@ pub(crate) fn sync_all(&mut self, cells: &mut [CellSlot<'_>]) -> SyncStats
 
 The internal `Phase` enum provides a debug-assertion safety net on top of the compile-time witness chain. It tracks `Write -- Retired -- Compacted -- Write`. Calling `retire_all` twice in the same boundary is a debug assertion failure. The enum also catches the stale-witness hole: if a caller holds a `SimulateA` across a boundary and attempts a `write_transform`, the enum's phase check fails loud.
 
-A common test pattern uses the split-stage API to verify intermediate state:
-
-```rust
-fn test_compact_between_retire_and_sync() {
-  let (retired, _drained) = boundary.retire(&mut store, &mut cells);
-  // At this point, retired slots are committed and pending
-  // retires are drained, but the slot registry may still show
-  // the old slot-to-row mapping because compaction hasn't run.
-  let compacted = retired.compact(&mut store, &mut cells);
-  // Now compacted rows have been moved but dirty bits are set.
-  let stats = compacted.sync(&mut store, &mut cells);
-  // After sync, GPU buffers match CPU state exactly.
-}
-```
-
 The pump discipline requires that every iteration ends with `queue.submit(empty())` and `device.poll(wait)`. Without this, the `write_buffer` pending-writes staging belt grows unbounded across iterations. The benchmarks discovered this the hard way. The original criterion measurements for `region_sync_1024_dirty_rows` showed private bytes exceeding 17 GB and statistics that never converged within the default sample count. The pump fixes both by reclaiming staging memory every iteration.
 
 An important subtlety about the boundary scan's byte-volume invariance: the slot-mirror comparison reads every occupied row regardless of how many transform bytes actually changed. The O(rows) scan is a fixed per-frame cost that does not scale with mutation volume. For a 1024-row cell this is 1024 u32 comparisons and branches. On modern x86 the branch is perfectly predictable in the steady state (same rows match every frame), so the cost stabilizes at a few nanoseconds per row. The measurement data bears this out: the gap between N=0 and N=1 in the gpu_timing table is small relative to the N=0 baseline itself, which is dominated by the fixed two-submit bracket overhead.
@@ -2235,8 +2182,6 @@ for lane in 0..8 {
 
 The NEON arm follows the same structure with 128-bit registers and 4 rows per iteration. It uses `vld1q_f32` for loads, `vcleq_f32`/`vcgeq_f32` for ordered comparisons, `vandq_u32` for bitwise AND, and extracts the 4-bit mask via `vshrq_n_u32(geo, 31)` followed by lane extracts.
 
-Property tests run 200 random scenarios per backend and assert bit-identical output. The `avx2_matches_scalar_bit_for_bit` test constructs random lengths from 0 to 300, random bounds columns, random liveness words, and random query boxes, then verifies that scalar and AVX2 produce identical output buffers and hit counts. The random lengths intentionally include edge cases near the 8-aligned boundary to exercise the scalar tail.
-
 The frustum scan follows the same pattern. Six planes, each with an inward normal `[nx, ny, nz, d]`. A point is inside plane `p` iff `nx*px + ny*py + nz*pz + d >= 0`. A box passes a plane if its positive vertex -- the corner farthest along the plane normal -- is inside.
 
 ```rust
@@ -2250,7 +2195,7 @@ if pl[0] * px + pl[1] * py + pl[2] * pz + pl[3] < 0.0 {
 
 The scalar reference short-circuits on the first failing plane. The SIMD arms compute all six plane tests and AND the masks. The result is identical because AND is idempotent. Evaluating every plane unconditionally also avoids branch mispredictions on the data-parallel workload, which matters at 100k+ rows per frame.
 
-The dot product in the SIMD arms uses separate mul and add instructions -- never FMA -- because FMA's single rounding would diverge from the scalar reference's mul-then-add. The property test asserts bit-identical output at every call site. Using FMA would produce slightly different results for borderline cases where the intermediate product's exponent range matters. The association `((nx*p x + ny*py) + nz*pz) + d` is also fixed to match exactly, because f32 addition is not associative.
+The dot product in the SIMD arms uses separate mul and add instructions -- never FMA -- because FMA's single rounding would diverge from the scalar reference's mul-then-add. Using FMA would produce slightly different results for borderline cases where the intermediate product's exponent range matters. The association `((nx*p x + ny*py) + nz*pz) + d` is also fixed to match exactly, because f32 addition is not associative.
 
 ```rust
 let dot = _mm256_add_ps(
@@ -2285,8 +2230,6 @@ _mm256_storeu_si256(tmp_remap.as_mut_ptr() as *mut __m256i, idx_compacted);
 dense.extend_from_slice(&tmp_dense[..popcount]);
 remap.extend_from_slice(&tmp_remap[..popcount]);
 ```
-
-The property test for compress_tokens checks 200 cases including boundary lengths 0, 1, 7, 8, 9, 63, 64, 65, 257, and 1024, plus random lengths up to 1200, with random hit densities from 0% to 100% and random base offsets including values near `u32::MAX`.
 
 ### 3.9 StreamingGrid -- spatial domain management
 
@@ -2360,7 +2303,7 @@ pub fn harvest_views(
 
 ### 3.11 GPU-native benchmarks
 
-Three benchmarks measure the GPU layer's performance. Two are integration benchmarks with their own harnesses. One is a criterion benchmark that exercises the boundary, harvest, and DEI paths. Each benchmark includes in-harness honesty checks that verify the measurement is valid.
+Three benchmarks measure the GPU layer's performance. Two are integration benchmarks with their own harnesses. One is a criterion benchmark that exercises the boundary, harvest, and DEI paths.
 
 **legacy_model_bench**
 
@@ -2368,26 +2311,29 @@ The centerpiece measurement compares SceneDB delta-sync against a full-upload ba
 
 The legacy model is deliberately an upper-bound faithful simulation, not a caricature. It builds a fresh `Vec<[f32; 16]>` covering every cell's full capacity every frame and issues one `write_buffer` per cell. No serde, no BVH rebuild, no entity destroy/recreate in the loop -- though the real `sync_scene` path pays for all three on top of the clone and upload. The measured legacy cost is therefore a lower bound.
 
-Four honesty checks run inside the benchmark:
-
-1. Zero-mutation SceneDB bytes must be 0 -- the sharp edge of claim #2. Asserted at M=0.
-2. Legacy bytes must be the same fixed `cells * 1024 * 64` every frame, independent of M.
-3. At M=100%, SceneDB bytes must be within one cell's padding of legacy bytes. The gap is at most the last cell's shortfall between occupied rows and the 1024-row capacity that legacy always re-uploads.
-4. SceneDB CPU time must be monotonic non-decreasing in M per S, within a fixed slack of 10% of the M=100% mean (floored at 20 us). The endpoints are also pinned: M=100% must exceed M=0.
-
 The pump discipline ensures every iteration ends with `queue.submit(empty()) + device.poll(wait)`. Without this, the pending-writes staging belt grows unbounded -- critical for the 100k scene where each legacy frame uploads 6.4 MB.
 
-Results at 100000 objects:
+Results across three scene sizes and five mutation rates:
 
-| M% | SceneDB CPU (mean/p95) | Legacy CPU (mean/p95) | Speedup | SceneDB bytes | Legacy bytes | Ratio |
-|---|---|---|---|---|---|---|
-| 0.0 | 152 / 163 µs | 1,345 / 1,398 µs | 8.8x | 0 | 6,400,000 | &infin; |
-| 0.1 | 168 / 179 µs | 1,354 / 1,412 µs | 8.1x | 6,400 | 6,400,000 | 1,000x |
-| 1.0 | 235 / 251 µs | 1,348 / 1,405 µs | 5.7x | 64,000 | 6,400,000 | 100x |
-| 10.0 | 780 / 812 µs | 1,361 / 1,418 µs | 1.7x | 640,000 | 6,400,000 | 10x |
-| 100.0 | 1,340 / 1,389 µs | 1,352 / 1,409 µs | 1.0x | 6,393,600 | 6,400,000 | 1.0x |
+| S | M% | SceneDB CPU (mean/p95) | Legacy CPU (mean/p95) | Speedup | SceneDB bytes | Legacy bytes | Byte ratio | Ranges |
+|---|---|---|---|---|---|---|---|---|
+| 1,000 | 0 | 1.68 / 1.70 us | 5.80 / 12.80 us | 3.46x | 0 | 65,536 | &infin; | 0 |
+| 1,000 | 0.1 | 3.70 / 4.50 us | 5.80 / 12.80 us | 1.57x | 64 | 65,536 | 1,024.00x | 1 |
+| 1,000 | 1 | 5.39 / 12.70 us | 5.80 / 12.80 us | 1.07x | 640 | 65,536 | 102.40x | 1 |
+| 1,000 | 10 | 5.70 / 12.90 us | 5.80 / 12.80 us | 1.02x | 6,400 | 65,536 | 10.24x | 1 |
+| 1,000 | 100 | 15.73 / 23.50 us | 5.80 / 12.80 us | 0.37x | 64,000 | 65,536 | 1.02x | 1 |
+| 10,000 | 0 | 15.81 / 15.90 us | 108.55 / 140.90 us | 6.86x | 0 | 655,360 | &infin; | 0 |
+| 10,000 | 0.1 | 18.51 / 22.50 us | 108.55 / 140.90 us | 5.87x | 640 | 655,360 | 1,024.00x | 1 |
+| 10,000 | 1 | 19.04 / 19.10 us | 108.55 / 140.90 us | 5.70x | 6,400 | 655,360 | 102.40x | 1 |
+| 10,000 | 10 | 31.57 / 40.60 us | 108.55 / 140.90 us | 3.44x | 64,000 | 655,360 | 10.24x | 1 |
+| 10,000 | 100 | 142.17 / 154.30 us | 108.55 / 140.90 us | 0.76x | 640,000 | 655,360 | 1.02x | 10 |
+| 100,000 | 0 | 158.53 / 161.70 us | 1,016.99 / 1,299.70 us | 6.42x | 0 | 6,422,528 | &infin; | 0 |
+| 100,000 | 0.1 | 172.20 / 193.30 us | 1,016.99 / 1,299.70 us | 5.91x | 6,400 | 6,422,528 | 1,003.52x | 1 |
+| 100,000 | 1 | 183.07 / 188.50 us | 1,016.99 / 1,299.70 us | 5.56x | 64,000 | 6,422,528 | 100.35x | 1 |
+| 100,000 | 10 | 290.25 / 307.40 us | 1,016.99 / 1,299.70 us | 3.50x | 640,000 | 6,422,528 | 10.04x | 10 |
+| 100,000 | 100 | 1,467.40 / 2,015.70 us | 1,016.99 / 1,299.70 us | 0.69x | 6,400,000 | 6,422,528 | 1.00x | 98 |
 
-The crossover analysis examines every S separately. At S=1000, SceneDB wins on CPU time across all tested M values. At S=100000, the crossover sits between M=10% and M=100%. Before the crossover, SceneDB wins. After it, the legacy full-upload path is slightly faster because there is nothing to track.
+At 0.1% mutation on 100k objects, SceneDB transfers 6,400 bytes against legacy's 6.4 MB -- a 1,003x bandwidth reduction. CPU time is 172 us against 1,017 us, a 5.9x speedup. At 1,000 objects the improvement is 1.07x to 1.57x; absolute costs land at single-digit microseconds where the fixed boundary overhead dominates. The crossover where delta stops winning on CPU time sits at M=100% for S=10,000 and S=100,000.
 
 The scattered-vs-contiguous comparison at S=10000, M=1%:
 
@@ -2396,9 +2342,20 @@ The scattered-vs-contiguous comparison at S=10000, M=1%:
 | Contiguous | 12.34 µs | 10 | 6,400 |
 | Scattered | 18.21 µs | 98 | 6,400 |
 
-Same byte volume, 9.8x more ranges, 1.48x more CPU time. This is the T2 range-count finding at the frame level. The byte volume is identical because both paths mutate 1% of rows. The range count grows with the number of runs, not the row count.
+Same byte volume, 9.8x more ranges, 1.48x more CPU time. The byte volume is identical because both paths mutate 1% of rows. The range count grows with the number of runs, not the row count.
 
 The GPU-ns pair at S=10000, M=1% amplifies 32 copies of the scene to overcome the two-submit bracket's fixed overhead. Delta mean 485 ns/cell, full-upload mean 12940 ns/cell.
+
+**SIMD spatial query scaling**
+
+| N (rows) | AABB scalar ns/row | AABB dispatched ns/row | Ratio | Frustum scalar ns/row | Frustum dispatched ns/row | Ratio |
+|---|---|---|---|---|---|---|
+| 1,024 | 1.0587 | 0.5417 | 1.95x | 3.5091 | 1.0417 | 3.37x |
+| 16,384 | 1.0729 | 0.5845 | 1.84x | 3.5522 | 1.0438 | 3.40x |
+| 256,000 | 1.0951 | 0.6590 | 1.66x | 3.5780 | 1.1570 | 3.09x |
+| 1,000,448 | 1.1013 | 0.6132 | 1.80x | 3.5934 | 1.1572 | 3.11x |
+
+All scan sizes fit in the 96 MB L3 cache. The kernels are compute-bound at every tier.
 
 **gpu_timing.rs**
 
@@ -2416,10 +2373,6 @@ The harness sweeps N in {0, 1, 64, 1024} contiguous dirty rows. Each measurement
 | Delta | 1,024 | 17,862.4 | 15,928.0 | 19,925.0 |
 | Full upload | 1,024 | 11,060.2 | 9,798.0 | 12,936.0 |
 
-The self-check assertions ensure the bracket is alive and not noise-dominated. N=1024 must be clearly above the N=0 floor (1.5x multiplier). The sequence must be monotonically non-decreasing within a 500 ns fixed slack.
-
-The file doc also documents a second pitfall discovered during development: the obvious way to amplify payloads -- looping `write_transform` + `boundary.run` inside the timed section -- measures CPU bookkeeping, not GPU copy cost, because the end timestamp cannot fire until the host actually calls the second submit. This harness avoids the pitfall by holding `REPEATS` independent cells and running a single `boundary.run` over all of them.
-
 **scenedb_bench (criterion)**
 
 `region_sync_1024_dirty_rows` measures the CPU-side cost of syncing a fully-dirty 1024-row region. Each iteration uses `iter_custom` to bracket only the boundary run, with the mark-dirty step and the pump both untimed.
@@ -2430,19 +2383,11 @@ The file doc also documents a second pitfall discovered during development: the 
 
 `promotion_demotion_cycle` measures one full register -- unregister -- force-complete -- drain cycle. Each iteration creates a region for a 64-row cell, destroys it with a pinned serial, force-completes the serial via `tracker.force_complete()`, and drains the region pool via `retire_all`.
 
-The alloc gate tests in `tests/alloc_gate_gpu.rs` verify that every GPU upload path issues zero heap allocations in the steady state. `scene_gpu_store_boundary_sync_zero_dirty_rows_zero_alloc` asserts `(stats.ranges, stats.bytes) == (0, 0)` on a clean second boundary -- a frame with no mutations must not touch the staging belt at all. `scene_gpu_store_boundary_sync_alloc_count_independent_of_dirty_row_count` asserts that the allocation count depends only on the number of coalesced ranges, not the number of dirty rows. A cell with 100 dirty rows in one contiguous block produces one `write_buffer` call. A cell with 100 dirty rows in 25 separate runs produces 25 `write_buffer` calls. In both cases the heap allocator is never involved -- the staging belt's internal buffer pool handles the transfers without calling `malloc`.
+Together these pieces form the substrate that Helio's shaders bind against. The SSBOs are the bridge between CPU and GPU -- one index space, one handle format, one set of generation-validated slots.
 
-Together these pieces form the substrate that Helio's shaders bind against. The SSBOs are the contract between the CPU and the GPU, one index space, one handle format, one set of generation-validated slots.
+## Part 4: Cross-Device Contract
 
-Part 4 covers how this contract survives across languages, backends, and device lifetimes.
-
-> [!TIP]
-> The `gpu` feature does not pull in Helio or any renderer code.
-> `cargo tree -p pulsar_scenedb --no-default-features | grep helio`
-> returns nothing. This is enforced in CI. You can build and test the storage
-> layer on a headless server or a CI runner with no GPU at all.
-
-## 4.1 One crate, two configurations
+### 4.1 One crate, two configurations
 
 SceneDB ships as a single crate. The core has zero GPU dependencies. The `gpu` feature adds wgpu and the full GPU-resident store. Two configurations from one `Cargo.toml`.
 
@@ -2485,15 +2430,11 @@ name = "gpu_assets"
 required-features = ["gpu"]
 ```
 
-```yaml
-- run: cargo check -p pulsar_scenedb --no-default-features --target x86_64-unknown-linux-gnu
-```
-
-A failure means someone pulled a GPU dependency into the base crate path. CI enforces it at every commit. A secondary job runs the same check on `aarch64-apple-darwin`. The wgpu dependency is optional and version-pinned independently -- SceneDB does not use the workspace-level wgpu fork. `cargo tree -p pulsar_scenedb --no-default-features -e normal | grep -i helio` returns nothing for both feature sets.
+The wgpu dependency is optional and version-pinned independently -- SceneDB does not use the workspace-level wgpu fork.
 
 This split is the foundation for every cross-device claim. The CPU side is authority. The GPU side is an optional derived mirror. A developer can edit, test, and benchmark the storage layer on a machine with no GPU at all.
 
-## 4.2 Rust to WGSL to backends
+### 4.2 Rust to WGSL to backends
 
 The slot mirror is the canonical example. On the Rust side it is a `SceneBuffer<u32>` with `T: Pod`, allocated once at capacity and never resized. On the WGSL side it is a `binding_array<storage, u32>`.
 
@@ -2501,9 +2442,9 @@ The slot mirror is the canonical example. On the Rust side it is a `SceneBuffer<
 @group(1) @binding(3) var<storage> slot_mirror: binding_array<u32>;
 ```
 
-Both sides see the same 64-byte aligned SoA layout. The WGSL struct uses scalar fields exclusively -- never `vec3<f32>`, which carries 16-byte alignment in WGSL and would shift every downstream offset relative to the Rust side. Test 3 enforces this via naga reflection: it compiles each shared struct in both Rust and WGSL and asserts every byte offset and struct size matches.
+Both sides see the same 64-byte aligned SoA layout. The WGSL struct uses scalar fields exclusively -- never `vec3<f32>`, which carries 16-byte alignment in WGSL and would shift every downstream offset relative to the Rust side.
 
-The phase machine enforces a different kind of cross-device contract. On the CPU side, `SimulateA` and `SimulateB` implement a sealed `SimulateWitness` trait. `write_transform` takes `&impl SimulateWitness`. A `HarvestPhase` reference fails to compile where a `SimulateA` reference passes. A `compile_fail` doc test proves no external implementation compiles.
+The phase machine enforces a different kind of cross-device contract. On the CPU side, `SimulateA` and `SimulateB` implement a sealed `SimulateWitness` trait. `write_transform` takes `&impl SimulateWitness`. A `HarvestPhase` reference fails to compile where a `SimulateA` reference passes. No external code can implement the sealed trait.
 
 The bridge between the two worlds is the submission serial. The CPU assigns a monotonic serial to every queue submit. `BoundaryPhase::retire` polls completed serials and drains the deferred-retire queue. A slot whose GPU-side generation has been incremented is safe to recycle because the semaphore callback guarantees every previous frame that referenced the old generation has finished. The GPU shader reads the generation buffer and validates handles. The CPU never writes the generation buffer until the GPU has signaled completion.
 
@@ -2531,9 +2472,9 @@ pub(crate) fn as_bytes<T: Pod>(s: &[T]) -> &[u8] {
 }
 ```
 
-No struct-by-struct serialization. No encoding pass. The byte representation is the Rust representation. The WGSL struct is hand-authored to match. Test 3 verifies every offset. The 64-byte column alignment in the page layout guarantees that a `write_buffer` spanning rows N through M writes a contiguous range of GPU memory with no holes. The column start in the GPU buffer is `column_index * element_stride * region_base` bytes. The Rust column is a flat slice. The two are the same layout by construction.
+No struct-by-struct serialization. No encoding pass. The byte representation is the Rust representation. The WGSL struct is hand-authored to match. The 64-byte column alignment in the page layout guarantees that a `write_buffer` spanning rows N through M writes a contiguous range of GPU memory with no holes. The column start in the GPU buffer is `column_index * element_stride * region_base` bytes. The Rust column is a flat slice. The two are the same layout by construction.
 
-## 4.3 How Vulkan, Metal, DX12, and WebGPU each see the same data
+### 4.3 How Vulkan, Metal, DX12, and WebGPU each see the same data
 
 Every SceneDB GPU buffer uses storage usage flags.
 
@@ -2595,106 +2536,9 @@ Bindless limits, indirect draw counts, and texture format support all differ acr
 
 A frame that renders identically on Vulkan and WebGPU is the architectural outcome of a layer boundary that treats the GPU as a consumer, not a co-owner.
 
-Test 13 and Test 14 prove the boundary holds at runtime. Drop Helio mid-frame, rebuild it against the same SceneDB. Destroy the device, re-materialize every buffer from SceneDB's CPU columns. Both pass without data loss. The CPU is authority. The GPU is mirror. Every backend sees the same mirror.
+The CPU is authority. The GPU is mirror. Every backend sees the same mirror.
 
-Performance contracts define the floor. Part 5 walks through how those contracts are defined, tested, and where they stand.
-
-## 5. Performance Contracts
-
-The SceneDB 2.0 spec defines roughly fifty performance claims. Each one is a testable assertion. Pass or fail. A defined threshold, a benchmark ID, and a verdict. The contract system, the validation campaign that tested it, the headline numbers, and what the gaps mean for the current milestone.
-
-The claim set reads like a specification for what could break. Delta-sync replaces per-frame copy-and-reconcile. Compaction is O(holes), not O(entities). Zero dirty rows produce zero GPU writes. The harvest pipeline allocates nothing after warm-up. The DEI threshold selects compute strategy, not bandwidth savings. Hysteresis prevents thrash. Region recycling avoids realloc under 500-cycle storms.
-
-### 5.1 The 50-Claim Contract
-
-Delta-sync won across every realistic mutation rate. At 0.1% mutation the speedup is 5.9x on CPU time and 1,003x on bandwidth. The crossover where delta stops winning sits at exactly 100% mutation for all scene sizes above 1,000 rows. SceneDB pays 13 to 15 nanoseconds per row for bookkeeping against legacy's 10 to 11. The delta wins at every rate a production frame sees.
-
-Zero-mutation frames upload nothing and allocate nothing. Contiguous dirty runs coalesce to one range regardless of length. The harvest pipeline allocates zero heap after warm-up.
-
-SIMD queries hit 1.9x to 3.4x over scalar. A mislabeled benchmark was corrected: the real scalar path was discovered for the first time during the campaign, replacing stale AVX2 numbers. The kernels are compute-bound at every cache tier.
-
-Hysteresis prevents thrash across 600 jitter frames. Promotion and demotion cost 4.2 to 4.5 microseconds flat. Region recycling proves genuine reuse across 500 cycles without a single realloc.
-
-Two gaps exist. The lease revocation path sets a flag but does not release the slot until a fence signal completes. The bind group uses nine storage buffers against WebGPU's eight-per-stage limit, requiring a device limit bump or a bind group split.
-
-Thirteen claims are gated on a renderer pass. GPU-versus-CPU cull equality, multi-view scaling, meshlet wavefront fill. The implementation has the hooks. The measurements need a consumer.
-
-### 5.2 The Perf Validation Campaign
-
-Eight test tasks across three benchmark suites. Hardware: AMD Ryzen 7 9800X3D, RTX 5080 over Vulkan. The campaign first fixed a critical harness bug: every GPU benchmark was measuring against an ever-growing staging pool that reached 17 GB. Untimed submit-and-poll after each iteration dropped memory to 330 MB.
-
-Allocation gates cover every query and upload path. The GPU timing harness uses a two-submit bracket (wgpu 30's single-submit form measures zero). The legacy model simulator deliberately favors legacy: no serde overhead, unconditional full-region upload. Every speedup is conservative.
-
-### 5.3 Key Numbers
-
-The empty spawn path runs at 539 to 560 Melem/s. The 4-component case runs at 3.35 Melem/s across every size. Query iteration hits 84 Melem/s for single queries and 19 Melem/s for 8-tuple. The 8-tuple improvement comes from removing eight `TypeId` comparisons per entity via direct `get_raw()` pointer access.
-
-**Delta-sync versus legacy full-resync.**
-
-The centerpiece measurement from T4 covers three scene sizes and five mutation rates. Fifty timed frames after 10 warm-up per cell, both paths pumped every iteration.
-
-| S | M% | SceneDB CPU (mean/p95) | Legacy CPU (mean/p95) | Speedup | SceneDB bytes | Legacy bytes | Byte ratio | Ranges |
-|---|---|---|---|---|---|---|---|---|
-| 1,000 | 0 | 1.68 / 1.70 us | 5.80 / 12.80 us | 3.46x | 0 | 65,536 | &infin; | 0 |
-| 1,000 | 0.1 | 3.70 / 4.50 us | 5.80 / 12.80 us | 1.57x | 64 | 65,536 | 1,024.00x | 1 |
-| 1,000 | 1 | 5.39 / 12.70 us | 5.80 / 12.80 us | 1.07x | 640 | 65,536 | 102.40x | 1 |
-| 1,000 | 10 | 5.70 / 12.90 us | 5.80 / 12.80 us | 1.02x | 6,400 | 65,536 | 10.24x | 1 |
-| 1,000 | 100 | 15.73 / 23.50 us | 5.80 / 12.80 us | 0.37x | 64,000 | 65,536 | 1.02x | 1 |
-| 10,000 | 0 | 15.81 / 15.90 us | 108.55 / 140.90 us | 6.86x | 0 | 655,360 | &infin; | 0 |
-| 10,000 | 0.1 | 18.51 / 22.50 us | 108.55 / 140.90 us | 5.87x | 640 | 655,360 | 1,024.00x | 1 |
-| 10,000 | 1 | 19.04 / 19.10 us | 108.55 / 140.90 us | 5.70x | 6,400 | 655,360 | 102.40x | 1 |
-| 10,000 | 10 | 31.57 / 40.60 us | 108.55 / 140.90 us | 3.44x | 64,000 | 655,360 | 10.24x | 1 |
-| 10,000 | 100 | 142.17 / 154.30 us | 108.55 / 140.90 us | 0.76x | 640,000 | 655,360 | 1.02x | 10 |
-| 100,000 | 0 | 158.53 / 161.70 us | 1,016.99 / 1,299.70 us | 6.42x | 0 | 6,422,528 | &infin; | 0 |
-| 100,000 | 0.1 | 172.20 / 193.30 us | 1,016.99 / 1,299.70 us | 5.91x | 6,400 | 6,422,528 | 1,003.52x | 1 |
-| 100,000 | 1 | 183.07 / 188.50 us | 1,016.99 / 1,299.70 us | 5.56x | 64,000 | 6,422,528 | 100.35x | 1 |
-| 100,000 | 10 | 290.25 / 307.40 us | 1,016.99 / 1,299.70 us | 3.50x | 640,000 | 6,422,528 | 10.04x | 10 |
-| 100,000 | 100 | 1,467.40 / 2,015.70 us | 1,016.99 / 1,299.70 us | 0.69x | 6,400,000 | 6,422,528 | 1.00x | 98 |
-
-At 0.1% mutation on 100k objects, SceneDB transfers 6,400 bytes. The legacy path transfers 6.4 megabytes. A 1,003x bandwidth reduction. CPU time is 172 microseconds against 1,017. Speedup of about 5.9x.
-
-At 1,000 objects the improvement shrinks to 1.07x to 1.57x. Absolute frame costs land at single-digit microseconds. The fixed boundary overhead dominates. Different regime where delta still wins but modestly.
-
-The crossover point where delta stops winning on CPU time sits at exactly M=100% for S=10,000 and S=100,000 across repeats. Scene-size independent for practical workloads. At S=1,000 the crossover is noise-sensitive, shifting between M=10% and M=100% depending on the run. Disclosed as a known instability of single-digit-microsecond magnitudes, not cited as a stable finding.
-
-**Scattered versus contiguous at S=10,000, M=1%.** 
-
-Five to seven times the CPU cost at equal byte volume when dirty rows are scattered across the page instead of contiguous. Purely from range count. Allocations scale with range count at about four per range, all wgpu-side. SceneDB itself holds no scratch Vec anywhere in the sync path that could grow with N. This is the data behind R-PERF-1, a gap-tolerant dirty coalescing experiment that could reduce range-count blowup by introducing a bounded gap threshold instead of strict adjacency.
-
-**GPU timing pair at S=10,000, M=1%.**
-
-| Path | Mean ns | p95 ns |
-|---|---|---|
-| Delta | 19,942.9 | 23,383.0 |
-| Full upload | 42,139.0 | 46,070.0 |
-
-Delta comes in at roughly half the GPU-timeline nanoseconds. The caveat from T3 applies: at these payload sizes delta about 205 KB, full about 21 MB across 32 repeats the two-submit bracket's fixed driver and kernel round-trip overhead, tens of microseconds on this host, is the same order of magnitude as the numbers themselves. Treat this pair as directional color, not precision measurement. The CPU-side matrix is the load-bearing evidence.
-
-**SIMD scaling across four orders of magnitude.**
-
-| N (rows) | AABB scalar ns/row | AABB dispatched ns/row | AABB ratio | Frustum scalar ns/row | Frustum dispatched ns/row | Frustum ratio |
-|---|---|---|---|---|---|---|
-| 1,024 | 1.0587 | 0.5417 | 1.954x | 3.5091 | 1.0417 | 3.369x |
-| 16,384 | 1.0729 | 0.5845 | 1.836x | 3.5522 | 1.0438 | 3.403x |
-| 256,000 | 1.0951 | 0.6590 | 1.662x | 3.5780 | 1.1570 | 3.092x |
-| 1,000,448 | 1.1013 | 0.6132 | 1.796x | 3.5934 | 1.1572 | 3.105x |
-
-De-confounded N=1024 ratios: AABB at 2.01x, frustum at 3.44x. The confound is a shared per-cell liveness Vec allocation, about 32 nanoseconds per call or 3% to 5% of the dispatched arm, symmetric across both arms, so it compresses ratios toward 1x. The true kernel delta is slightly higher than the raw numbers.
-
-Cache-tier analysis at 24 bytes per row:
-
-| N | Total footprint | Tier | AABB dispatched GB/s | Frustum dispatched GB/s |
-|---|---|---|---|---|
-| 1,024 | 24 KB | L1 (48 KB/core) | 44.3 | 23.0 |
-| 16,384 | 384 KB | L2 (1 MB/core) | 41.1 | 23.0 |
-| 256,000 | 6.14 MB | L3 (96 MB) | 36.4 | 20.7 |
-| 1,000,448 | 24.0 MB | L3 (still 25%) | 39.1 | 20.7 |
-
-Every tier tested stays inside the 96 MB L3. The scan is compute-bound at every scale. The all-core bandwidth available per core from L1 is higher than what this benchmark saturates. Entities per cycle at a 5.2 GHz assumption: AABB scalar at 0.182, dispatched at 0.355. Frustum scalar at 0.055, dispatched at 0.185. The original spec aspiration of 16 entities per cycle was a theoretical AVX-512 bound that the contract itself already demoted before this campaign.
-
-Promotion and demotion latency: mean 45.2 µs, p95 58.5. Harvest partition at 50% hit ratio: 1.147 µs. DEI compact at 12.5% hit ratio: 731.8 ns. Region sync: 8.02 µs. All within spec.
-
-## 6. GPU-Driven Culling and Indirect Draw
+## Part 5: GPU-Driven Culling and Indirect Draw
 
 ### 6.1 The Cull Pass
 
@@ -2713,12 +2557,6 @@ commands are silently dropped; the CPU reads the counter back and clamps.
 The draw executor issues `multi_draw_indexed_indirect` over the per-view
 command buffer with a WGSL shader that fetches transforms via
 `visible_instance_ids[first_instance]`.
-
-Test 13 and Test 14 validate the stateless renderer contract: drop Helio
-mid-frame and rebuild against the same SceneDB with zero bytes transferred,
-or destroy the device and re-materialize every buffer from SceneDB's CPU
-columns. Both pass without data loss. Test 4 and Test 5 verify end-to-end
-transform tracking and command buffer overflow handling.
 
 ### 6.2 Mesh Shaders and Virtual Geometry
 

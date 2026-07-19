@@ -55,8 +55,13 @@ if (!fs.existsSync(postsDir)) {
 
 const files = fs.readdirSync(postsDir)
   .filter(f => f.endsWith('.md'))
-  .sort()
-  .reverse(); // newest first (relies on date-prefixed filenames)
+  .sort((a, b) => {
+    const aRaw = fs.readFileSync(path.join(postsDir, a), 'utf-8');
+    const bRaw = fs.readFileSync(path.join(postsDir, b), 'utf-8');
+    const aDate = parseFrontmatter(aRaw).data.date || a.replace(/\.md$/, '').split('-').slice(0, 3).join('-');
+    const bDate = parseFrontmatter(bRaw).data.date || b.replace(/\.md$/, '').split('-').slice(0, 3).join('-');
+    return bDate.localeCompare(aDate);
+  });
 
 const posts = [];
 

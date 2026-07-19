@@ -17,7 +17,7 @@ This post is about how that profiler works, what went wrong during development, 
 
 ---
 
-## The Three-Buffer Pipeline
+## Why Three Buffers Instead of One
 
 GPU timestamp queries in wgpu follow a pattern that looks like over-engineering on paper but makes sense once you understand the hardware constraints. The GPU writes timestamps into a **query set** — an opaque hardware resource that the CPU cannot read directly. A second command, `resolve_query_set`, copies those timestamps into a **query buffer** with `QUERY_RESOLVE | COPY_SRC` usage. A third command copies from the query buffer into a **resolve buffer** with `COPY_DST | MAP_READ` usage — this is the buffer the CPU is allowed to map and read.
 

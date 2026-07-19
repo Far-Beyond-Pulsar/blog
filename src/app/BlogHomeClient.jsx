@@ -73,8 +73,8 @@ export default function BlogHomeClient({
             From the Pulsar team
           </h1>
           <p className="text-white/45 text-base sm:text-lg max-w-2xl leading-relaxed">
-            Deep dives into renderer architecture, ECS design, Rust patterns,
-            and everything else we learn building a GPU-driven game engine from scratch.
+            What happens when you build a GPU-driven game engine from nothing —
+            the breakthroughs, the rabbit holes, and all the bugs we found along the way.
           </p>
           <p className="text-xs text-white/20 mt-6">
             {filteredPosts.length} of {total} posts

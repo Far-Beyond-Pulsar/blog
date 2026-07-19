@@ -4,7 +4,7 @@ import BlogHomeClient from "./BlogHomeClient";
 export const metadata = {
   title: "Pulsar Blog",
   description:
-    "Engineering updates, deep dives, and release notes from the Pulsar game engine team.",
+    "What we're building, breaking, and fixing inside the Pulsar game engine — renderer deep dives, Rust patterns, and everything we learn along the way.",
 };
 
 const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || "";

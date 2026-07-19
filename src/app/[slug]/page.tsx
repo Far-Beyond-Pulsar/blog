@@ -74,7 +74,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
             href={`${BASE}/`}
             className="inline-flex items-center gap-1.5 text-sm text-white/35 hover:text-white/70 transition-colors mb-8"
           >
-            ← All posts
+            ← Back to blog
           </a>
 
           {meta.tags.length > 0 && (
@@ -124,7 +124,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
                 href={`${BASE}/`}
                 className="text-sm text-white/40 hover:text-white/70 transition-colors"
               >
-                ← All posts
+                ← Back to blog
               </a>
               <a
                 href="https://github.com/Far-Beyond-Pulsar/Pulsar-Native/discussions"
@@ -132,7 +132,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
                 rel="noopener noreferrer"
                 className="text-sm text-[#0ea5e9] hover:underline"
               >
-                Discuss on GitHub →
+                Continue the discussion on GitHub →
               </a>
             </div>
           </div>

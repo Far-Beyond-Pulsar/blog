@@ -7,7 +7,7 @@ description: "How Helio's Radiant material system combines hand-authored shader 
 thumbnail: /post_thumb/radiant.png
 ---
 
-## The Problem With Fixed Materials
+## When PBR Isn't Enough
 
 Helio was built around a deferred PBR pipeline. Every material shared the same GBuffer shader. The `GpuMaterial` struct stored base color, roughness, metallic, emissive, a few texture handles, and a workflow discriminant. The shader read these from a storage buffer and evaluated them the same way for every object. No branching, no specialization, no per-material code paths.
 

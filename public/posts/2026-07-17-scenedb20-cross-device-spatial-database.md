@@ -198,6 +198,24 @@ authoritative scene object data. Transforms, mesh registries, generation
 buffers, and slot mirrors belong to SceneDB. Helio binds SceneDB-owned buffers
 and runs passes over them. The scene state lives in one place.
 
+```mermaid
+flowchart TD
+    subgraph SceneDB["SceneDB owns - authoritative scene state"]
+        direction TB
+        T["Instance transforms<br/>Mesh registries<br/>Generation buffers<br/>Slot mirrors<br/>Vertex/Index geometry"]
+    end
+    subgraph Helio["Helio owns - renderer internals"]
+        direction TB
+        P["Pipelines & shaders<br/>Shadow atlases<br/>Framebuffers<br/>Draw scratch buffers<br/>Hi-Z pyramid"]
+    end
+    subgraph Shared["Shared context"]
+        D["GPU Device + Queue"]
+    end
+    D --> SceneDB
+    D --> Helio
+    SceneDB -.->|binds buffers| Helio
+```
+
 ```rust
 // Helio binds SceneDB buffers, it does not own them
 let transform_buffer: &SceneBuffer<[f32; 4; 4]> = &scenedb.transforms;
@@ -266,9 +284,20 @@ completion. Only when that signal arrives does the retirement process: the
 generation bumps, the new generation value is written to the VRAM validation
 buffer, and the slot returns to the free pool.
 
-```
-Slot 14 (gen 2) marked for deletion enqueued with serial S
-S signals completion gen bumps to 3 VRAM buffer updated slot freed
+```mermaid
+sequenceDiagram
+    participant CPU
+    participant GPU as GPU Queue
+    participant Sem as Timeline Semaphore
+    participant VRAM as VRAM Gen Buffer
+    
+    CPU->>GPU: submit(serial S)
+    CPU->>Slot: mark_pending_retire(slot 14, gen 2)
+    Note over CPU: slot enters deferred eviction queue
+    GPU->>Sem: signal completion
+    Sem->>CPU: serial S complete
+    CPU->>VRAM: write_generation(slot 14, gen 3)
+    CPU->>Slot: commit_retire() → free pool
 ```
 
 No frame counter arithmetic. No heuristic estimate of how far behind the GPU
@@ -2032,6 +2061,33 @@ Mutation APIs like `write_transform` take `&impl SimulateWitness`. A `HarvestPha
 
 Each transition consumes the witness. `SimulateA::end` returns `SimulateB`. `SimulateB::end` returns `HarvestPhase`. `HarvestPhase::end` returns `BoundaryPhase`. `BoundaryPhase::run` consumes itself. The only way to get a fresh `SimulateA` is through `FrameDriver::begin`.
 
+```mermaid
+stateDiagram-v2
+    [*] --> SimulateA: FrameDriver::begin
+    
+    state SimulateA {
+        [*] --> Mutate: write_transform, alloc, free
+    }
+    SimulateA --> SimulateB: end()
+    
+    state SimulateB {
+        [*] --> Mutate: write_transform, alloc, free
+    }
+    SimulateB --> HarvestPhase: end() + Release fence
+    
+    state HarvestPhase {
+        [*] --> ReadOnly: spatial queries, harvest scan
+    }
+    HarvestPhase --> BoundaryPhase: end() + Acquire fence
+    
+    state BoundaryPhase {
+        [*] --> Retire: drain deferred-retire queue
+        Retire --> Compact: swap-and-pop dead rows
+        Compact --> Sync: write_buffer uploads + slot mirror scan
+    }
+    BoundaryPhase --> [*]: run()
+```
+
 > [!WARNING]
 > The witness system prevents accidental misuse but does not prevent deliberate
 > hoarding. A caller who stores a `SimulateA` reference across a boundary can
@@ -2077,6 +2133,25 @@ The same pump appears in every benchmark and test that issues `write_buffer` cal
 Dead rows accumulate holes. When an entity is freed, its row stays in place - marked dead in the liveness mask but occupying space in every column array. Compaction reclaims that space.
 
 The algorithm is swap-and-pop. The last live row in the cell is moved into the hole. The row count shrinks by one. Handles that pointed at the moved row are redirected by a compaction callback before the move completes.
+
+```mermaid
+flowchart LR
+    subgraph Before["Before compaction"]
+        direction TB
+        B0["row 0: A (live)"]
+        B1["row 1: ✗ (dead)"]
+        B2["row 2: B (live)"]
+        B3["row 3: ✗ (dead)"]
+        B4["row 4: C (live)"]
+    end
+    subgraph After["After compaction"]
+        direction TB
+        A0["row 0: A (live)"]
+        A1["row 4: C (live, swapped)"]
+        A2["row 2: B (live)"]
+    end
+    Before -->|"swap C into first hole, pop tail"| After
+```
 
 ```rust
 slot.cell.compact_report(|from, to| {

@@ -43,9 +43,11 @@ function parseFrontmatter(raw) {
 }
 
 export function getPostContent(slug) {
-  const filePath = path.join(postsDir, `${slug}.md`);
-  if (!fs.existsSync(filePath)) return null;
-
+  let filePath = path.join(postsDir, `${slug}.md`);
+  if (!fs.existsSync(filePath)) {
+    filePath = path.join(postsDir, slug, 'index.md');
+    if (!fs.existsSync(filePath)) return null;
+  }
   const raw = fs.readFileSync(filePath, 'utf-8');
   const { content } = parseFrontmatter(raw);
   return content;

@@ -113,7 +113,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
 
           {/* Main content */}
           <div className="flex-1 min-w-0">
-            <BlogMarkdown content={content} />
+            <BlogMarkdown content={content} slug={slug} />
 
             {/* Author details */}
             <AuthorFooter authors={authorList} />

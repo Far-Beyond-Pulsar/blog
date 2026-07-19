@@ -9,6 +9,8 @@ import rehypeSlug from 'rehype-slug';
 import rehypeRaw from 'rehype-raw';
 import rehypeKatex from 'rehype-katex';
 import { visit } from 'unist-util-visit';
+import type { Plugin } from 'unified';
+import type { Root } from 'mdast';
 import 'katex/dist/katex.min.css';
 
 // Lazy-load Monaco so it doesn't inflate the initial bundle
@@ -192,6 +194,83 @@ function PreBlock({ children }: { children?: React.ReactNode }) {
   return <MonacoCodeBlock lang={lang} code={code} />;
 }
 
+function ImageBlock({ src, alt }: { src?: string; alt?: string }) {
+  const [fullscreen, setFullscreen] = useState(false);
+  const panRef = useRef({ x: 0, y: 0, scale: 1 });
+  const imgRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef({ dragging: false, startX: 0, startY: 0, panX: 0, panY: 0 });
+
+  useEffect(() => {
+    if (!fullscreen) { document.body.style.overflow = ''; return; }
+    document.body.style.overflow = 'hidden';
+    if (imgRef.current) {
+      imgRef.current.innerHTML = `<img src="${src}" style="width:90vw;height:90vh;object-fit:contain" />`;
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [fullscreen, src]);
+
+  useEffect(() => {
+    if (!fullscreen || !overlayRef.current) return;
+    const el = overlayRef.current;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      panRef.current.scale = Math.min(Math.max(panRef.current.scale * delta, 0.25), 8);
+      applyTransform();
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [fullscreen]);
+
+  const applyTransform = () => {
+    if (imgRef.current) {
+      const { panX, panY } = dragRef.current;
+      const { scale } = panRef.current;
+      imgRef.current.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    }
+  };
+
+  const resetView = () => {
+    panRef.current = { x: 0, y: 0, scale: 1 };
+    dragRef.current.panX = 0; dragRef.current.panY = 0;
+    applyTransform();
+  };
+
+  return (
+    <>
+      <span className="inline-block relative group">
+        <img src={src} alt={alt || ''} className="max-w-full h-auto rounded-lg cursor-zoom-in" onClick={() => setFullscreen(true)} />
+        <button onClick={(e) => { e.stopPropagation(); setFullscreen(true); }} className="absolute top-2 right-2 px-3 py-1.5 text-sm rounded bg-black/60 hover:bg-black/80 text-white/80 hover:text-white transition-colors shadow-lg">
+          ⛶ Fullscreen
+        </button>
+      </span>
+      {fullscreen && (
+        <div ref={overlayRef} className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center overflow-hidden touch-none select-none"
+          onMouseDown={e => {
+            dragRef.current.dragging = true;
+            dragRef.current.startX = e.clientX - dragRef.current.panX;
+            dragRef.current.startY = e.clientY - dragRef.current.panY;
+          }}
+          onMouseMove={e => {
+            if (!dragRef.current.dragging) return;
+            dragRef.current.panX = e.clientX - dragRef.current.startX;
+            dragRef.current.panY = e.clientY - dragRef.current.startY;
+            applyTransform();
+          }}
+          onMouseUp={() => { dragRef.current.dragging = false; }}
+          onMouseLeave={() => { dragRef.current.dragging = false; }}
+        >
+          <button onClick={() => { setFullscreen(false); document.body.style.overflow = ''; }} className="absolute top-5 right-5 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-colors text-lg">✕</button>
+          <button onClick={resetView} className="absolute bottom-5 right-5 z-10 px-3 py-1.5 text-xs rounded bg-white/10 hover:bg-white/20 text-white/60 hover:text-white/90 transition-colors">Reset</button>
+          <div className="absolute top-5 left-5 text-xs text-white/30 select-none pointer-events-none">Scroll to zoom · Drag to pan</div>
+          <div ref={imgRef} className="pointer-events-none" style={{ transform: 'translate(0px, 0px) scale(1)' }} />
+        </div>
+      )}
+    </>
+  );
+}
+
 // Flatten React children to a plain string (handles string | string[] | nested elements)
 function extractText(node: React.ReactNode): string {
   if (typeof node === 'string') return node.trimEnd();
@@ -263,15 +342,34 @@ function AlertBlock({ alertType, children }: { alertType: string; children?: Rea
   );
 }
 
-export default function BlogMarkdown({ content }: { content: string }) {
+function remarkRewriteRelative(slug: string): Plugin<[], Root> {
+  const prefix = `/posts/${slug}/`;
+  return () => (tree) => {
+    visit(tree, ['image', 'link'], (node: any) => {
+      if (node.url && (node.url.startsWith('./') || node.url.startsWith('../'))) {
+        node.url = prefix + node.url.replace(/^\.\//, '');
+      }
+    });
+    visit(tree, 'html', (node: any) => {
+      if (typeof node.value === 'string') {
+        node.value = node.value.replace(/(src|href)="\.\//g, `$1="${prefix}`);
+      }
+    });
+  };
+}
+
+export default function BlogMarkdown({ content, slug }: { content: string; slug?: string }) {
+  const plugins = slug ? [remarkGfm, remarkMath, remarkAlertPlugin, remarkRewriteRelative(slug)] : [remarkGfm, remarkMath, remarkAlertPlugin];
+
   return (
     <div className="prose">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkAlertPlugin]}
+        remarkPlugins={plugins}
         rehypePlugins={[rehypeSlug, rehypeRaw, rehypeKatex]}
         components={{
           pre:   PreBlock  as any,
           code:  InlineCode as any,
+          img:   ImageBlock as any,
           table: TableWrapper as any,
           div:   (props: any) => {
             if (props['data-alert']) {

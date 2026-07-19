@@ -1925,7 +1925,7 @@ latency is the expected contract. Eventual consistency, not immediate.
 > transform animation sampled at sub-frame timing), batch the writes on the CPU and
 > upload the final value once.
 
-## Part 3: GPU Layer
+## 3. GPU Layer
 
 The GPU layer is where SceneDB earns its name. Everything upstream exists to feed this machine. The GPU store owns persistent device buffers that outlive any renderer instance. The phase machine enforces that mutation and read-only access never overlap. The harvest pipeline scans every live cell and produces the exact byte sequences the shaders need for indirect draw dispatch.
 
@@ -2460,7 +2460,7 @@ The harness sweeps N in {0, 1, 64, 1024} contiguous dirty rows. Each measurement
 
 Together these pieces form the substrate that Helio's shaders bind against. The SSBOs are the bridge between CPU and GPU - one index space, one handle format, one set of generation-validated slots.
 
-## Part 4: Cross-Device Contract
+## 4. Cross-Device Contract
 
 ### 4.1 One crate, two configurations
 
@@ -2613,9 +2613,9 @@ A frame that renders identically on Vulkan and WebGPU is the architectural outco
 
 The CPU is authority. The GPU is mirror. Every backend sees the same mirror.
 
-## Part 5: GPU-Driven Culling and Indirect Draw
+## 5. GPU-Driven Culling and Indirect Draw
 
-### 6.1 The Cull Pass
+### 5.1 The Cull Pass
 
 The cull pass runs once per view. The compute shader receives a dense token
 array and aligned expected-generation column from `view_upload.rs`. Each thread
@@ -2633,7 +2633,7 @@ The draw executor issues `multi_draw_indexed_indirect` over the per-view
 command buffer with a WGSL shader that fetches transforms via
 `visible_instance_ids[first_instance]`.
 
-### 6.2 Mesh Shaders and Virtual Geometry
+### 5.2 Mesh Shaders and Virtual Geometry
 
 The traditional pipeline culls at the object level and emits one draw per
 visible entity. Virtual geometry needs finer granularity. Each entity is a
@@ -2657,7 +2657,7 @@ tests. Survivors are amplified into mesh shader workgroups that transform and
 emit geometry. The task shader decides what survives; the mesh shader only
 transforms and emits.
 
-### 6.3 HLOD and the Streaming Grid
+### 5.3 HLOD and the Streaming Grid
 
 The concentric cell streaming model divides the world into three domains.
 Without HLOD proxies, outer buffer cells produce nothing. Every cell has a
@@ -2674,3 +2674,35 @@ Cross-fade between L0 and HLOD uses the hysteresis mechanism with dithered
 screen-space stippling. Exactly one representation renders at any pixel during
 the transition. The streaming grid budget system manages VRAM for proxy meshes
 against worst-case observer positions.
+
+## 6. Test Tool
+
+The SceneDB stress test TUI is an interactive terminal dashboard that runs nine concurrent workloads against the storage layer. It was the primary tool used to surface the `GenericColumn` init-bit desync bug and validate the fix across thousands of iterations.
+
+```text
+cargo run -p pulsar_scenedb --example stress_tui
+```
+
+![Stress test TUI showing nine workloads with live metrics, sparklines, and event log](./assets/scenedb-test-tool.png)
+
+Each workload runs on its own thread and hammers a specific subsystem:
+
+| # | Workload | Target |
+|---|----------|--------|
+| 1 | EntityStorm | `World::spawn` / `despawn` throughput and slot recycling |
+| 2 | CellAllocStorm | `CellStorage` alloc/free/compact cycles across 128 concurrent cells |
+| 3 | SpatialQueryStorm | AABB and frustum queries on 1000 random bounding boxes |
+| 4 | HandlePressure | `HandleRegistry` generation cycling and stale-handle rejection |
+| 5 | LeasePressure | `LeaseMask` acquire/release pool exhaustion |
+| 6 | GenericColStress | `GenericColumn` swap under concurrent pressure (init-bit desync) |
+| 7 | ConcurrentRW | Multi-threaded `LivenessMask` read/write with relaxed atomics |
+| 8 | MixedFrame | Full game-loop sim: simulate → harvest → boundary phases |
+| 9 | GpuComponentStress | `SceneStore` derive macro output and `#[gpu]` field descriptor verification |
+
+The TUI provides keyboard-driven navigation. `Tab` cycles focus between the workload list and event log. Arrow keys move the cursor or scroll the log. `Enter` or `d` opens a detail view for the highlighted workload showing a latency sparkline and per-second stats. Keys `1` through `9` jump directly to a workload's detail. `p` pauses all workloads, `r` resets counters, and `q` quits.
+
+![Workload detail view showing latency sparkline and per-second statistics](./assets/crossover-matrix.png)
+
+The event log records lifecycle events — workload start/stop, pause/resume, counter resets, and periodic status summaries every three seconds. Errors are highlighted in red. The log scrolls with `PgUp`/`PgDn`, `Home`/`End`, and arrow keys when focused.
+
+![Event log panel with scrollable status and error entries](./assets/alloc-gate-results.png)

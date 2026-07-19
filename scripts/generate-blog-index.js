@@ -53,21 +53,36 @@ if (!fs.existsSync(postsDir)) {
   console.log('Created public/posts/ — add markdown files there.');
 }
 
-const files = fs.readdirSync(postsDir)
-  .filter(f => f.endsWith('.md'))
-  .sort((a, b) => {
-    const aRaw = fs.readFileSync(path.join(postsDir, a), 'utf-8');
-    const bRaw = fs.readFileSync(path.join(postsDir, b), 'utf-8');
-    const aDate = parseFrontmatter(aRaw).data.date || a.replace(/\.md$/, '').split('-').slice(0, 3).join('-');
-    const bDate = parseFrontmatter(bRaw).data.date || b.replace(/\.md$/, '').split('-').slice(0, 3).join('-');
-    return bDate.localeCompare(aDate);
-  });
+const entries = fs.readdirSync(postsDir, { withFileTypes: true });
+const files = [];
+for (const entry of entries) {
+  if (entry.name.endsWith('.md')) {
+    files.push(entry.name); // flat file
+  } else if (entry.isDirectory() && fs.existsSync(path.join(postsDir, entry.name, 'index.md'))) {
+    files.push(entry.name + '/index.md'); // folder post
+  }
+}
+
+function readFileContent(file) {
+  return fs.readFileSync(path.join(postsDir, file), 'utf-8');
+}
+
+function slugFromFile(file) {
+  return file.endsWith('/index.md') ? file.replace(/\/index\.md$/, '') : file.replace(/\.md$/, '');
+}
+
+function dateFromFile(file) {
+  const raw = readFileContent(file);
+  return parseFrontmatter(raw).data.date || slugFromFile(file).split('-').slice(0, 3).join('-');
+}
+
+files.sort((a, b) => dateFromFile(b).localeCompare(dateFromFile(a)));
 
 const posts = [];
 
 for (const file of files) {
-  const slug = file.replace(/\.md$/, '');
-  const raw = fs.readFileSync(path.join(postsDir, file), 'utf-8');
+  const slug = slugFromFile(file);
+  const raw = readFileContent(file);
   const { data, content } = parseFrontmatter(raw);
 
   // Resolve thumbnail: full URLs pass through; relative paths (starting with /)
@@ -75,6 +90,9 @@ for (const file of files) {
   const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || '';
   let thumbnail = data.thumbnail || null;
   if (thumbnail && !thumbnail.startsWith('http://') && !thumbnail.startsWith('https://')) {
+    if (file.endsWith('/index.md') && thumbnail.startsWith('./')) {
+      thumbnail = `/posts/${slug}/` + thumbnail.slice(2);
+    }
     thumbnail = BASE + thumbnail;
   }
 

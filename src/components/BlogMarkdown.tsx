@@ -94,6 +94,14 @@ function InlineCode({ children }: { children?: React.ReactNode }) {
   return <code className="inline-code">{children}</code>;
 }
 
+function TableWrapper({ children }: { children?: React.ReactNode }) {
+  return (
+    <div className="overflow-x-auto my-6">
+      <table className="min-w-full">{children}</table>
+    </div>
+  );
+}
+
 const ALERT_TYPES = new Set(['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION']);
 
 // Remark plugin: transform > [!NOTE] / > [!CAUTION] blockquotes into <div data-alert="NOTE">
@@ -149,9 +157,10 @@ export default function BlogMarkdown({ content }: { content: string }) {
         remarkPlugins={[remarkGfm, remarkMath, remarkAlertPlugin]}
         rehypePlugins={[rehypeSlug, rehypeRaw, rehypeKatex]}
         components={{
-          pre:  PreBlock  as any,
-          code: InlineCode as any,
-          div:  (props: any) => {
+          pre:   PreBlock  as any,
+          code:  InlineCode as any,
+          table: TableWrapper as any,
+          div:   (props: any) => {
             if (props['data-alert']) {
               return <AlertBlock alertType={props['data-alert']}>{props.children}</AlertBlock>;
             }

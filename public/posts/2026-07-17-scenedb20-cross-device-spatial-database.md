@@ -3,7 +3,7 @@ title: "SceneDB 2.0: The Cross-Device Spatial Database"
 date: "2026-07-17"
 author: ["tristanpoland", "sepehrnour"]
 tags: ["scenedb", "ecs", "gpu", "rust", "wgpu", "database", "game-engine", "rendering", "pulsar"]
-description: "A deep technical walkthrough of SceneDB 2.0, a cross-device spatial database that replaces the traditional push-model ECS with GPU-native columns, delta-minimal uploads, self-healing slot mirrors, and compile-time frame phase enforcement. 35,000 words covering the full architecture from handle packing to mesh shader dispatch."
+description: "A deep technical walkthrough of SceneDB 2.0, a cross-device spatial database that replaces the traditional push-model ECS with GPU-native columns, delta-minimal uploads, self-healing slot mirrors, and compile-time frame phase enforcement."
 thumbnail: /post_thumb/engine.png
 ---
 
@@ -70,7 +70,7 @@ entirety or risk staleness.
 
 > [!NOTE]
 > The push-model is not inherently wrong. At small entity counts the overhead
-> is negligible. The problem is that it does not scale — the cost is O(entities)
+> is negligible. The problem is that it does not scale - the cost is O(entities)
 > per frame regardless of how few entities changed. SceneDB replaces this with
 > a cost proportional to the number of mutations, not the total scene size.
 
@@ -78,7 +78,7 @@ Each subsystem solves this problem in isolation. Physics builds an incremental
 broadphase in its own memory, invisible to the renderer. The editor reads the
 game thread's arrays directly, coupling itself to a single consumer's layout.
 Audio, AI, and networking each add their own sync channels. The cost is
-superlinear -- each new consumer multiplies the pairwise reconciliation paths.
+superlinear - each new consumer multiplies the pairwise reconciliation paths.
 
 This is the problem SceneDB was built to solve. Not incremental optimization of
 the sync channels. Removal of the sync channels entirely. One store. One
@@ -371,7 +371,7 @@ space, both sides.
 > `Handle::INVALID`. The method checks `generation() != 0`, which covers both
 > the zero-initialised case and any handle whose generation was never set.
 > Comparing against `INVALID` misses the case where a partially-written handle
-> has a zero generation but a nonzero slot index — `is_valid()` catches it.
+> has a zero generation but a nonzero slot index - `is_valid()` catches it.
 
 ```rust
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -410,7 +410,7 @@ rejected before any data is read.
 
 Generation zero is permanently reserved. `Handle::INVALID` is `Handle(0)`.
 Active generations start at one. A handle reaching `u32::MAX` on free is
-permanently retired -- no wraparound, no aliasing.
+permanently retired - no wraparound, no aliasing.
 
 On the CPU a handle resolves in two O(1) array reads. The `slot_to_row` table
 returns a row offset into the SoA page columns. The slot index is stable for
@@ -892,7 +892,7 @@ what generation each slot is at.
 ```rust
 > [!CAUTION]
 > A slot whose generation reaches `u32::MAX` is permanently retired. The slot
-> is never recycled — the handle is dead forever. In practice this requires
+> is never recycled - the handle is dead forever. In practice this requires
 > 4.3 billion allocate-free cycles on the same slot index. The retirement is
 > an absolute bound on handle aliasing, not a realistic failure mode.
 
@@ -1293,7 +1293,7 @@ pub fn has_columns(&self, ids: &[ComponentId]) -> bool {
 }
 ```
 
-The column vec is indexed directly by `ComponentId.0 as usize`. A precomputed `active_cids` field stores the subset of populated columns, so migration routines iterate only active entries. The archetype index deduplicates automatically -- each new component combination creates a new archetype, and the hashmap lookup is a single probe.
+The column vec is indexed directly by `ComponentId.0 as usize`. A precomputed `active_cids` field stores the subset of populated columns, so migration routines iterate only active entries. The archetype index deduplicates automatically - each new component combination creates a new archetype, and the hashmap lookup is a single probe.
 
 ### 2.2 Component storage and column traits
 
@@ -1851,13 +1851,13 @@ pub struct RigidBody {
 
 `#[derive(SceneComponent)]` composes three concerns. `#[derive(Reflectable)]` generates
 runtime type metadata with field names, types, and byte offsets for serialization.
-`#[engine_class(...)]` registers the component with the reflection system — each
+`#[engine_class(...)]` registers the component with the reflection system - each
 `#[property]` field gets a getter, setter, and type info for the UI. `#[derive(SceneStore)]`
-makes `Pod`, `CellType`, and `GpuColumnSet` — every field becomes a column in SceneDB
+makes `Pod`, `CellType`, and `GpuColumnSet` - every field becomes a column in SceneDB
 storage, and each `#[gpu]` field gets a GPU-resident buffer that the CPU writes into at the frame boundary.
 
 GPU-native fields live resident on the device. The CPU side never reads them back.
-Updates arrive as events from the simulation phase — a transform change, a mesh swap,
+Updates arrive as events from the simulation phase - a transform change, a mesh swap,
 a material override. Each event writes the new value into the CPU-side column and
 marks the row dirty. At the frame boundary, `sync_all` coalesces the dirty marks into
 contiguous ranges and issues one `write_buffer` per range. The GPU sees the new values
@@ -1870,7 +1870,7 @@ each field to its column write and dirty mark. The boundary scan reads the same
 descriptor entries to know which buffers to scan. Any `Pod` type can be a `#[gpu]`
 field. No code outside SceneDB needs to know about the sync path.
 
-GPU-native fields are immutable on the GPU between boundaries — the shader reads them,
+GPU-native fields are immutable on the GPU between boundaries - the shader reads them,
 the CPU queues updates, and the boundary applies them. This means a `#[gpu]` field
 read in the middle of a frame reflects the previous boundary's state. Frame-level
 latency is the expected contract. Eventual consistency, not immediate.
@@ -1880,14 +1880,14 @@ latency is the expected contract. Eventual consistency, not immediate.
 > `DirtyMask` before issuing uploads. In the steady state nothing changes
 > between frames and the scan exits without a single `write_buffer` call.
 > The slot-mirror scan still runs every frame (u32 compare per row), but
-> at 100,000 rows that takes a few microseconds — no device-side work.
+> at 100,000 rows that takes a few microseconds - no device-side work.
 
 > [!CAUTION]
 > A `#[gpu]` field written during simulation is invisible to the GPU until the next
 > boundary. Reading it back on the CPU side after writing returns the new value (the
 > CPU column is updated immediately), but the GPU sees the old value until the frame
 > boundary flush. Cross-device read-after-write in the same frame reads stale GPU data.
-> If a shader must see the write in the same frame, do not use `#[gpu]` — use a
+> If a shader must see the write in the same frame, do not use `#[gpu]` - use a
 > CPU-only field and an explicit `write_buffer` upload instead.
 >
 > A `#[gpu]` field written twice in the same frame coalesces: only the last write
@@ -1899,7 +1899,7 @@ latency is the expected contract. Eventual consistency, not immediate.
 
 The GPU layer is where SceneDB earns its name. Everything upstream exists to feed this machine. The GPU store owns persistent device buffers that outlive any renderer instance. The phase machine enforces that mutation and read-only access never overlap. The harvest pipeline scans every live cell and produces the exact byte sequences the shaders need for indirect draw dispatch.
 
-### 3.1 SceneGpuStore -- the cross-device bridge
+### 3.1 SceneGpuStore - the cross-device bridge
 
 `SceneGpuStore` owns five persistent buffers: transform SSBO, instance-info SSBO, slot-mirror SSBO, generation buffer, and a per-cell metadata buffer. All five are allocated once and never reallocate.
 
@@ -1915,7 +1915,7 @@ pub fn register_cell(
 ) -> Result<CellId, RegionError>
 ```
 
-`register_cell` allocates the row and slot regions, seeds the generation buffer from the registry, marks every occupied row dirty, and sets up per-cell shadow state for delta-minimal writes. Pool exhaustion returns `Err(RegionError)` -- a graceful decline, not a panic.
+`register_cell` allocates the row and slot regions, seeds the generation buffer from the registry, marks every occupied row dirty, and sets up per-cell shadow state for delta-minimal writes. Pool exhaustion returns `Err(RegionError)` - a graceful decline, not a panic.
 
 The generation buffer is the slot-indexed SSBO mirroring `HandleRegistry::generations()`. Each cell's region is seeded at registration. A tail scrub zeroes the unused portion of a recycled region's generation buffer, preventing stale-generation validation against a prior tenant's data.
 
@@ -1931,7 +1931,7 @@ if occupied < slot_capacity {
 }
 ```
 
-The gen_shadow is initialized from the registry. Each slot's shadow starts at the registry's current generation value. Tail entries start at 0. A recycled region's shadow must forget the prior tenant's values too -- the shadow for every slot is set to 0 first, then the occupied prefix is overwritten from the registry.
+The gen_shadow is initialized from the registry. Each slot's shadow starts at the registry's current generation value. Tail entries start at 0. A recycled region's shadow must forget the prior tenant's values too - the shadow for every slot is set to 0 first, then the occupied prefix is overwritten from the registry.
 
 The GPU store does not mirror every CPU column. Only columns declared as GPU-native appear in the device buffers. A `SpatialCell::with_transform` carries a `[f32; 16]` transform column and an `InstanceInfo` column. Both are token-registered in the page layout and picked up by `register_cell`. Columns without a GPU mirror stay CPU-only. No tracking overhead, no upload cost. The distinction is in the column list, not in the API.
 
@@ -1947,7 +1947,7 @@ pub fn with_transform(capacity: u32) -> Result<Self, LayoutError> {
 }
 ```
 
-`write_transform` writes the CPU transform column, marks the dirty bit, and stamps the handle's generation into the generation buffer. `write_instance_info` mirrors the same pattern for the cull shader's `InstanceInfo` column. The generation stamp lives on `write_transform` only -- one stamping path prevents ambiguity about which column owns a slot's first stamp.
+`write_transform` writes the CPU transform column, marks the dirty bit, and stamps the handle's generation into the generation buffer. `write_instance_info` mirrors the same pattern for the cull shader's `InstanceInfo` column. The generation stamp lives on `write_transform` only - one stamping path prevents ambiguity about which column owns a slot's first stamp.
 
 `rebuild` handles device-loss recovery. It constructs a fresh store from every cell's CPU-authoritative columns, bulk-writes every column into the device buffers, and clears warm-up dirty marks. No GPU-only state exists to lose. The slot mirror is bulk-filled from the slot column directly rather than waiting for the first boundary scan.
 
@@ -1955,7 +1955,7 @@ pub fn with_transform(capacity: u32) -> Result<Self, LayoutError> {
 
 ### 3.2 Dirty tracking and delta-minimal upload
 
-Each mirrored column holds a `DirtyMask` -- a bitmask of which rows changed since the last sync. `write_transform` writes the CPU column and marks the row. `sync_all` iterates marked rows, coalesces adjacent marks into contiguous ranges, and issues one `write_buffer` per range. Zero dirty rows means zero GPU writes.
+Each mirrored column holds a `DirtyMask` - a bitmask of which rows changed since the last sync. `write_transform` writes the CPU column and marks the row. `sync_all` iterates marked rows, coalesces adjacent marks into contiguous ranges, and issues one `write_buffer` per range. Zero dirty rows means zero GPU writes.
 
 The mask is a `Vec<AtomicU64>` sized to the cell's row capacity. Marking a row is an atomic fetch-or of `1 << (row % 64)`. Relaxed ordering suffices because the phase machine's Release/Acquire fence pair provides the happens-before edge between column writes and the sync read.
 
@@ -2022,9 +2022,9 @@ The slot mirror is a `SceneBuffer<u32>` indexed by GPU row. Each entry holds `sl
 
 `sync_all` runs a boundary scan over every occupied row. It compares a per-row shadow against the authoritative slot column. On mismatch it marks the row dirty, computes `slot_base + slot_column[row]`, writes the result into a scratch buffer, and schedules an upload.
 
-The shadow starts at `u32::MAX` for every row. Real slots are far below `slot_capacity`, so the first frame uploads every occupied row. After steady state only rows whose slot changed trigger a write. This catches every staleness path: write after alloc, compaction swap, alloc re-occupying a vacated row. Earlier per-event trigger designs missed cases. The alloc re-occupying a vacated row was the worst -- no trigger fired because the row was never written to, yet its slot mirror entry still held the prior occupant's global slot. The boundary scan closes every path with one invariant.
+The shadow starts at `u32::MAX` for every row. Real slots are far below `slot_capacity`, so the first frame uploads every occupied row. After steady state only rows whose slot changed trigger a write. This catches every staleness path: write after alloc, compaction swap, alloc re-occupying a vacated row. Earlier per-event trigger designs missed cases. The alloc re-occupying a vacated row was the worst - no trigger fired because the row was never written to, yet its slot mirror entry still held the prior occupant's global slot. The boundary scan closes every path with one invariant.
 
-### 3.4 The phase machine -- compile-time frame ordering
+### 3.4 The phase machine - compile-time frame ordering
 
 Frame phases are types, not runtime values. `SimulateA` and `SimulateB` permit mutation. `HarvestPhase` permits reads only. `BoundaryPhase` runs the retire-compact-sync pipeline. The type system enforces ordering at compile time through sealed traits with zero runtime cost.
 
@@ -2035,22 +2035,22 @@ Each transition consumes the witness. `SimulateA::end` returns `SimulateB`. `Sim
 > [!WARNING]
 > The witness system prevents accidental misuse but does not prevent deliberate
 > hoarding. A caller who stores a `SimulateA` reference across a boundary can
-> mutate during the harvest window — the type system cannot catch it because
+> mutate during the harvest window - the type system cannot catch it because
 > the reference is not lifetime-tied to the frame. An internal `Phase` enum
 > tracks the current phase at runtime and asserts on misuse in debug builds.
 > Release builds skip the check for performance.
 
-The memory ordering contract lives in the transitions. `SimulateB::end` emits a `Release` fence. `HarvestPhase::end` emits a paired `Acquire` fence. Single-threaded callers pay nothing -- the fence emits no instruction on x86-64 and only orders the thread's own stores.
+The memory ordering contract lives in the transitions. `SimulateB::end` emits a `Release` fence. `HarvestPhase::end` emits a paired `Acquire` fence. Single-threaded callers pay nothing - the fence emits no instruction on x86-64 and only orders the thread's own stores.
 
 ### 3.5 Frame lifecycle from end to end
 
 A full frame traces through four phase transitions, each consuming the witness.
 
 ```rust
-let sim_a = driver.begin();                  // SimulateA -- mutation
+let sim_a = driver.begin();                  // SimulateA - mutation
 store.write_transform(id, cell, handle, &matrix, &sim_a);
 let sim_b = sim_a.end();
-let harvest = sim_b.end();                   // Harvest -- read only
+let harvest = sim_b.end();                   // Harvest - read only
 let n = pipeline.harvest_cell(&spatial_cell, ..., &harvest);
 let boundary = harvest.end();                // BoundaryPhase
 let stats = boundary.run(&mut store, &mut cells);  // retire → compact → sync
@@ -2064,17 +2064,17 @@ let stats = boundary.run(&mut store, &mut cells);  // retire → compact → syn
 pub(crate) fn sync_all(&mut self, cells: &mut [CellSlot<'_>]) -> SyncStats
 ```
 
-The internal `Phase` enum provides a debug-assertion safety net on top of the compile-time witness chain. It tracks `Write -- Retired -- Compacted -- Write`. Calling `retire_all` twice in the same boundary is a debug assertion failure. The enum also catches the stale-witness hole: if a caller holds a `SimulateA` across a boundary and attempts a `write_transform`, the enum's phase check fails loud.
+The internal `Phase` enum provides a debug-assertion safety net on top of the compile-time witness chain. It tracks `Write - Retired - Compacted - Write`. Calling `retire_all` twice in the same boundary is a debug assertion failure. The enum also catches the stale-witness hole: if a caller holds a `SimulateA` across a boundary and attempts a `write_transform`, the enum's phase check fails loud.
 
 The pump discipline requires that every iteration ends with `queue.submit(empty())` and `device.poll(wait)`. Without this, the `write_buffer` pending-writes staging belt grows unbounded across iterations. The benchmarks discovered this the hard way. The original criterion measurements for `region_sync_1024_dirty_rows` showed private bytes exceeding 17 GB and statistics that never converged within the default sample count. The pump fixes both by reclaiming staging memory every iteration.
 
 An important subtlety about the boundary scan's byte-volume invariance: the slot-mirror comparison reads every occupied row regardless of how many transform bytes actually changed. The O(rows) scan is a fixed per-frame cost that does not scale with mutation volume. For a 1024-row cell this is 1024 u32 comparisons and branches. On modern x86 the branch is perfectly predictable in the steady state (same rows match every frame), so the cost stabilizes at a few nanoseconds per row. The measurement data bears this out: the gap between N=0 and N=1 in the gpu_timing table is small relative to the N=0 baseline itself, which is dominated by the fixed two-submit bracket overhead.
 
-The same pump appears in every benchmark and test that issues `write_buffer` calls in a loop, including `legacy_model_bench` and `gpu_timing.rs`. It is deliberately placed in the untimed section -- outside the `Instant::now()` bracket for CPU measurements and outside the `measure_ns` closure for GPU timestamp measurements -- so the flush cost does not inflate the reported numbers.
+The same pump appears in every benchmark and test that issues `write_buffer` calls in a loop, including `legacy_model_bench` and `gpu_timing.rs`. It is deliberately placed in the untimed section - outside the `Instant::now()` bracket for CPU measurements and outside the `measure_ns` closure for GPU timestamp measurements - so the flush cost does not inflate the reported numbers.
 
-### 3.6 Compaction -- swap-and-pop with handle redirection
+### 3.6 Compaction - swap-and-pop with handle redirection
 
-Dead rows accumulate holes. When an entity is freed, its row stays in place -- marked dead in the liveness mask but occupying space in every column array. Compaction reclaims that space.
+Dead rows accumulate holes. When an entity is freed, its row stays in place - marked dead in the liveness mask but occupying space in every column array. Compaction reclaims that space.
 
 The algorithm is swap-and-pop. The last live row in the cell is moved into the hole. The row count shrinks by one. Handles that pointed at the moved row are redirected by a compaction callback before the move completes.
 
@@ -2087,7 +2087,7 @@ slot.cell.compact_report(|from, to| {
 
 The callback marks the destination row dirty in the transform and instance-info masks. The source row already has whatever dirty state it carried. After compaction the next sync uploads both the moved row's new position and any dirty bits from the old position.
 
-The slot registry absorbs the redirect. `HandleRegistry::compact` updates the slot-to-row mapping for every moved handle. The handle itself never changes -- it still carries the same slot index and generation. A query that resolves the handle to a row gets the new position automatically. The slot column is updated atomically with the move.
+The slot registry absorbs the redirect. `HandleRegistry::compact` updates the slot-to-row mapping for every moved handle. The handle itself never changes - it still carries the same slot index and generation. A query that resolves the handle to a row gets the new position automatically. The slot column is updated atomically with the move.
 
 Compaction cost is proportional to the number of holes, not the total entity count. A cell with 1000 live rows and 24 dead rows moves at most 24 rows. The loop is `from = hole, to = last_live`, not a full defragment.
 
@@ -2109,7 +2109,7 @@ pub(crate) fn compact_all_gated(
 }
 ```
 
-The lease-gated variant `compact_all_gated` accepts a `ready` callback called once per cell. A cell reported not ready keeps its holes until the next boundary. This is the seam where lease-based compaction gating connects -- a cell with outstanding harvest leases defers compaction until every lease drops or is revoked.
+The lease-gated variant `compact_all_gated` accepts a `ready` callback called once per cell. A cell reported not ready keeps its holes until the next boundary. This is the seam where lease-based compaction gating connects - a cell with outstanding harvest leases defers compaction until every lease drops or is revoked.
 
 The `compact_all` function is exactly `compact_all_gated` with an always-true gate. This ensures the two can never silently diverge in behavior.
 
@@ -2119,15 +2119,15 @@ Compaction also interacts with the `slot_shadow` array. The shadow stores the la
 
 `free_deferred` marks a handle for retirement without reclaiming its slot. The row is pinned in the liveness mask and queued against a submission serial from the `SubmissionTracker`. At the frame boundary, `retire_all` polls the completed watermark and drains every pending retirement whose serial has completed.
 
-Lease slots provide a second protection mechanism. Each cell has a `LeaseMask` -- a 64-bit atomic bitmask. A reader acquires a slot for the duration of a query. Pool exhaustion returns `None`, not a blocking call. The frame-boundary compaction checks `any_held()` is false before running swap-and-pop.
+Lease slots provide a second protection mechanism. Each cell has a `LeaseMask` - a 64-bit atomic bitmask. A reader acquires a slot for the duration of a query. Pool exhaustion returns `None`, not a blocking call. The frame-boundary compaction checks `any_held()` is false before running swap-and-pop.
 
-A `HarvestLease` pairs the lease slot with a revocation flag and wall-clock timestamp. The harvest pipeline revokes leases held past a 2.0 ms isolation budget. `force_release` includes an ABA guard -- the mask bit clears exactly once, preventing a late Drop from releasing a reissued slot.
+A `HarvestLease` pairs the lease slot with a revocation flag and wall-clock timestamp. The harvest pipeline revokes leases held past a 2.0 ms isolation budget. `force_release` includes an ABA guard - the mask bit clears exactly once, preventing a late Drop from releasing a reissued slot.
 
 `compaction_ready` revokes overdue leases and returns `!mask.any_held()`. The safety argument: in-flight reads run against a pinned `LivenessSnapshot`, never the live mask or live rows. Compaction moving rows underneath the snapshot cannot tear a mid-way read.
 
 Leases are caller-owned objects. Neither `CellSlot` nor `SceneGpuStore` carries a `LeaseMask`. Wiring one per registered `CellId` is a documented architecture change.
 
-### 3.8 Spatial queries -- AABB and frustum
+### 3.8 Spatial queries - AABB and frustum
 
 `SpatialCell` holds six bounds columns (min_x through max_z) plus an optional transform and `InstanceInfo` column. The query predicate checks all six axis comparisons plus liveness. Results are written as a positional token array: `out[row] = row` on hit, `NULL_ROW` on miss. All comparisons use ordered IEEE predicates for bit-identical SIMD behavior.
 
@@ -2182,7 +2182,7 @@ for lane in 0..8 {
 
 The NEON arm follows the same structure with 128-bit registers and 4 rows per iteration. It uses `vld1q_f32` for loads, `vcleq_f32`/`vcgeq_f32` for ordered comparisons, `vandq_u32` for bitwise AND, and extracts the 4-bit mask via `vshrq_n_u32(geo, 31)` followed by lane extracts.
 
-The frustum scan follows the same pattern. Six planes, each with an inward normal `[nx, ny, nz, d]`. A point is inside plane `p` iff `nx*px + ny*py + nz*pz + d >= 0`. A box passes a plane if its positive vertex -- the corner farthest along the plane normal -- is inside.
+The frustum scan follows the same pattern. Six planes, each with an inward normal `[nx, ny, nz, d]`. A point is inside plane `p` iff `nx*px + ny*py + nz*pz + d >= 0`. A box passes a plane if its positive vertex - the corner farthest along the plane normal - is inside.
 
 ```rust
 let px = if pl[0] >= 0.0 { bmax[0] } else { bmin[0] };
@@ -2195,7 +2195,7 @@ if pl[0] * px + pl[1] * py + pl[2] * pz + pl[3] < 0.0 {
 
 The scalar reference short-circuits on the first failing plane. The SIMD arms compute all six plane tests and AND the masks. The result is identical because AND is idempotent. Evaluating every plane unconditionally also avoids branch mispredictions on the data-parallel workload, which matters at 100k+ rows per frame.
 
-The dot product in the SIMD arms uses separate mul and add instructions -- never FMA -- because FMA's single rounding would diverge from the scalar reference's mul-then-add. Using FMA would produce slightly different results for borderline cases where the intermediate product's exponent range matters. The association `((nx*p x + ny*py) + nz*pz) + d` is also fixed to match exactly, because f32 addition is not associative.
+The dot product in the SIMD arms uses separate mul and add instructions - never FMA - because FMA's single rounding would diverge from the scalar reference's mul-then-add. Using FMA would produce slightly different results for borderline cases where the intermediate product's exponent range matters. The association `((nx*p x + ny*py) + nz*pz) + d` is also fixed to match exactly, because f32 addition is not associative.
 
 ```rust
 let dot = _mm256_add_ps(
@@ -2231,7 +2231,7 @@ dense.extend_from_slice(&tmp_dense[..popcount]);
 remap.extend_from_slice(&tmp_remap[..popcount]);
 ```
 
-### 3.9 StreamingGrid -- spatial domain management
+### 3.9 StreamingGrid - spatial domain management
 
 The world is partitioned into streaming domains. Each cell starts in `Outer` residency and transitions through `Margin` to `Inner` as the observer approaches. The hysteresis band machine prevents oscillation via four concentric zones derived from each cell's base bounds:
 
@@ -2244,11 +2244,11 @@ The world is partitioned into streaming domains. Each cell starts in `Outer` res
 
 `pad` defaults to 10% of cell width. `hyst` is an absolute world-unit value. The gap between promotion and demotion boundaries is the hysteresis band. Observer jitter inside the band triggers no transition in either direction.
 
-Transition rules evaluate from the cell's committed domain. `classify` never mutates committed state -- it only queues transitions for execution at the boundary. A declined promotion leaves the cell in its current domain for retry next frame.
+Transition rules evaluate from the cell's committed domain. `classify` never mutates committed state - it only queues transitions for execution at the boundary. A declined promotion leaves the cell in its current domain for retry next frame.
 
 Cross-fade alpha advances by world distance traveled. `advance_crossfade` moves alpha linearly by `distance / fade_distance`. `execute_transitions` is the one place the grid touches `SceneGpuStore`, calling `register_cell` for promotions and `unregister_cell` for evictions. VRAM budgets are validated at construction. `write_cell_metadata` packs alpha and domain for every materialized cell into the `cell_metadata` SSBO.
 
-### 3.10 Harvest pipeline -- GPU-side draw target extraction
+### 3.10 Harvest pipeline - GPU-side draw target extraction
 
 The harvest pass runs after simulation on read-only data. It scans every cell's occupied rows, evaluates the spatial predicate, and routes valid tokens into class-specific staging arrays.
 
@@ -2258,7 +2258,7 @@ The Density Efficiency Index selects between plain and DEI-compacted paths. When
 
 `HarvestStaging` is persistent across frames. Vecs are cleared but never deallocated. A decay policy prevents burst inflation: if peak usage over the last 8 frames stays below 50% of capacity, the buffer is halved.
 
-`ViewTokenBuffers` is the device-side landing point for the staging arrays. It owns two SSBOs per class -- one for tokens, one for expected generations. It grows on demand with a 1.5x factor and never shrinks. Upload issues two `write_buffer` calls per non-empty class column.
+`ViewTokenBuffers` is the device-side landing point for the staging arrays. It owns two SSBOs per class - one for tokens, one for expected generations. It grows on demand with a 1.5x factor and never shrinks. Upload issues two `write_buffer` calls per non-empty class column.
 
 ```rust
 pub fn upload(
@@ -2286,9 +2286,9 @@ pub fn revalidate_run(cell: &SpatialCell, run: &mut [u32]) -> u32 {
 }
 ```
 
-This operates on positional local token runs only -- never on the global (region-offset) tokens from `HarvestStaging`. A global token would misindex the cell's liveness words or silently check the wrong row. The function is only valid within the issuing frame, before compaction could reuse any freed slot. A run carried across a frame boundary needs a fresh query.
+This operates on positional local token runs only - never on the global (region-offset) tokens from `HarvestStaging`. A global token would misindex the cell's liveness words or silently check the wrong row. The function is only valid within the issuing frame, before compaction could reuse any freed slot. A run carried across a frame boundary needs a fresh query.
 
-The multi-view harvest driver `harvest_views` scans every `(cell, region_base, class)` against every view, routing each view's hits into its own scratchpad and staging array. Queries over different views may run on separate threads -- the pipeline holds no mutable state and each view has its own scratch buffers.
+The multi-view harvest driver `harvest_views` scans every `(cell, region_base, class)` against every view, routing each view's hits into its own scratchpad and staging array. Queries over different views may run on separate threads - the pipeline holds no mutable state and each view has its own scratch buffers.
 
 ```rust
 pub fn harvest_views(
@@ -2309,9 +2309,9 @@ Three benchmarks measure the GPU layer's performance. Two are integration benchm
 
 The centerpiece measurement compares SceneDB delta-sync against a full-upload baseline at scene sizes from 1000 to 100000 entities and mutation percentages from 0% to 100%. The fixture uses the realistic multi-cell shape, scenes split into 1024-row cells matching the page capacity.
 
-The legacy model is deliberately an upper-bound faithful simulation, not a caricature. It builds a fresh `Vec<[f32; 16]>` covering every cell's full capacity every frame and issues one `write_buffer` per cell. No serde, no BVH rebuild, no entity destroy/recreate in the loop -- though the real `sync_scene` path pays for all three on top of the clone and upload. The measured legacy cost is therefore a lower bound.
+The legacy model is deliberately an upper-bound faithful simulation, not a caricature. It builds a fresh `Vec<[f32; 16]>` covering every cell's full capacity every frame and issues one `write_buffer` per cell. No serde, no BVH rebuild, no entity destroy/recreate in the loop - though the real `sync_scene` path pays for all three on top of the clone and upload. The measured legacy cost is therefore a lower bound.
 
-The pump discipline ensures every iteration ends with `queue.submit(empty()) + device.poll(wait)`. Without this, the pending-writes staging belt grows unbounded -- critical for the 100k scene where each legacy frame uploads 6.4 MB.
+The pump discipline ensures every iteration ends with `queue.submit(empty()) + device.poll(wait)`. Without this, the pending-writes staging belt grows unbounded - critical for the 100k scene where each legacy frame uploads 6.4 MB.
 
 Results across three scene sizes and five mutation rates:
 
@@ -2333,7 +2333,7 @@ Results across three scene sizes and five mutation rates:
 | 100,000 | 10 | 290.25 / 307.40 us | 1,016.99 / 1,299.70 us | 3.50x | 640,000 | 6,422,528 | 10.04x | 10 |
 | 100,000 | 100 | 1,467.40 / 2,015.70 us | 1,016.99 / 1,299.70 us | 0.69x | 6,400,000 | 6,422,528 | 1.00x | 98 |
 
-At 0.1% mutation on 100k objects, SceneDB transfers 6,400 bytes against legacy's 6.4 MB -- a 1,003x bandwidth reduction. CPU time is 172 us against 1,017 us, a 5.9x speedup. At 1,000 objects the improvement is 1.07x to 1.57x; absolute costs land at single-digit microseconds where the fixed boundary overhead dominates. The crossover where delta stops winning on CPU time sits at M=100% for S=10,000 and S=100,000.
+At 0.1% mutation on 100k objects, SceneDB transfers 6,400 bytes against legacy's 6.4 MB - a 1,003x bandwidth reduction. CPU time is 172 us against 1,017 us, a 5.9x speedup. At 1,000 objects the improvement is 1.07x to 1.57x; absolute costs land at single-digit microseconds where the fixed boundary overhead dominates. The crossover where delta stops winning on CPU time sits at M=100% for S=10,000 and S=100,000.
 
 The scattered-vs-contiguous comparison at S=10000, M=1%:
 
@@ -2359,9 +2359,9 @@ All scan sizes fit in the 96 MB L3 cache. The kernels are compute-bound at every
 
 **gpu_timing.rs**
 
-This harness measures GPU-side nanosecond timing for the boundary-sync delta path against the binary payload model. It uses a two-submit timestamp bracket -- the only ordering wgpu guarantees for the pending-writes belt.
+This harness measures GPU-side nanosecond timing for the boundary-sync delta path against the binary payload model. It uses a two-submit timestamp bracket - the only ordering wgpu guarantees for the pending-writes belt.
 
-The file doc explains the bracket ordering in detail. `Queue::submit_pending_submission` splices the pending-writes command buffer at position 0 of every submission. A single-submit bracket with both timestamps in the same `submit()` call would run the copies before both timestamps. The two-submit form guarantees `[timestamp 0] -- [pending writes] -- [timestamp 1]`.
+The file doc explains the bracket ordering in detail. `Queue::submit_pending_submission` splices the pending-writes command buffer at position 0 of every submission. A single-submit bracket with both timestamps in the same `submit()` call would run the copies before both timestamps. The two-submit form guarantees `[timestamp 0] - [pending writes] - [timestamp 1]`.
 
 The harness sweeps N in {0, 1, 64, 1024} contiguous dirty rows. Each measurement is amortized across 256 independent cells per bracket.
 
@@ -2377,13 +2377,13 @@ The harness sweeps N in {0, 1, 64, 1024} contiguous dirty rows. Each measurement
 
 `region_sync_1024_dirty_rows` measures the CPU-side cost of syncing a fully-dirty 1024-row region. Each iteration uses `iter_custom` to bracket only the boundary run, with the mark-dirty step and the pump both untimed.
 
-`harvest_partition_1024` measures pure-CPU harvest cost for a 1024-row cell at 50% selectivity -- the plain path with no DEI compaction. The fixture distributes boxes from x=[0,1] to x=[1023,1024], and the query `[-0.5, 511.5]` hits exactly 512 rows.
+`harvest_partition_1024` measures pure-CPU harvest cost for a 1024-row cell at 50% selectivity - the plain path with no DEI compaction. The fixture distributes boxes from x=[0,1] to x=[1023,1024], and the query `[-0.5, 511.5]` hits exactly 512 rows.
 
 `dei_compact_1024_sparse` measures the same cell at 12.5% selectivity, forcing the DEI-compacted path. The query `[-0.5, 127.5]` hits 128 out of 1024 rows, well below the 25% DEI threshold.
 
-`promotion_demotion_cycle` measures one full register -- unregister -- force-complete -- drain cycle. Each iteration creates a region for a 64-row cell, destroys it with a pinned serial, force-completes the serial via `tracker.force_complete()`, and drains the region pool via `retire_all`.
+`promotion_demotion_cycle` measures one full register - unregister - force-complete - drain cycle. Each iteration creates a region for a 64-row cell, destroys it with a pinned serial, force-completes the serial via `tracker.force_complete()`, and drains the region pool via `retire_all`.
 
-Together these pieces form the substrate that Helio's shaders bind against. The SSBOs are the bridge between CPU and GPU -- one index space, one handle format, one set of generation-validated slots.
+Together these pieces form the substrate that Helio's shaders bind against. The SSBOs are the bridge between CPU and GPU - one index space, one handle format, one set of generation-validated slots.
 
 ## Part 4: Cross-Device Contract
 
@@ -2430,7 +2430,7 @@ name = "gpu_assets"
 required-features = ["gpu"]
 ```
 
-The wgpu dependency is optional and version-pinned independently -- SceneDB does not use the workspace-level wgpu fork.
+The wgpu dependency is optional and version-pinned independently - SceneDB does not use the workspace-level wgpu fork.
 
 This split is the foundation for every cross-device claim. The CPU side is authority. The GPU side is an optional derived mirror. A developer can edit, test, and benchmark the storage layer on a machine with no GPU at all.
 
@@ -2442,7 +2442,7 @@ The slot mirror is the canonical example. On the Rust side it is a `SceneBuffer<
 @group(1) @binding(3) var<storage> slot_mirror: binding_array<u32>;
 ```
 
-Both sides see the same 64-byte aligned SoA layout. The WGSL struct uses scalar fields exclusively -- never `vec3<f32>`, which carries 16-byte alignment in WGSL and would shift every downstream offset relative to the Rust side.
+Both sides see the same 64-byte aligned SoA layout. The WGSL struct uses scalar fields exclusively - never `vec3<f32>`, which carries 16-byte alignment in WGSL and would shift every downstream offset relative to the Rust side.
 
 The phase machine enforces a different kind of cross-device contract. On the CPU side, `SimulateA` and `SimulateB` implement a sealed `SimulateWitness` trait. `write_transform` takes `&impl SimulateWitness`. A `HarvestPhase` reference fails to compile where a `SimulateA` reference passes. No external code can implement the sealed trait.
 

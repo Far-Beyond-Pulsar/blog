@@ -1,6 +1,6 @@
 ---
 title: "SceneDB 2.0: The Cross-Device Spatial Database"
-date: "2026-07-17"
+date: "2026-07-19"
 author: ["tristanpoland", "sepehrnour"]
 tags: ["scenedb", "ecs", "gpu", "rust", "wgpu", "database", "game-engine", "rendering", "pulsar"]
 description: "A deep technical walkthrough of SceneDB 2.0, a cross-device spatial database that replaces the traditional push-model ECS with GPU-native columns, delta-minimal uploads, self-healing slot mirrors, and compile-time frame phase enforcement."

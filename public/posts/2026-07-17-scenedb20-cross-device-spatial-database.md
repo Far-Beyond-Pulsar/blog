@@ -290,6 +290,7 @@ sequenceDiagram
     participant GPU as GPU Queue
     participant Sem as Timeline Semaphore
     participant VRAM as VRAM Gen Buffer
+    participant Slot as Slot Manager
     
     CPU->>GPU: submit(serial S)
     CPU->>Slot: mark_pending_retire(slot 14, gen 2)
@@ -2062,30 +2063,29 @@ Mutation APIs like `write_transform` take `&impl SimulateWitness`. A `HarvestPha
 Each transition consumes the witness. `SimulateA::end` returns `SimulateB`. `SimulateB::end` returns `HarvestPhase`. `HarvestPhase::end` returns `BoundaryPhase`. `BoundaryPhase::run` consumes itself. The only way to get a fresh `SimulateA` is through `FrameDriver::begin`.
 
 ```mermaid
-stateDiagram-v2
-    [*] --> SimulateA: FrameDriver::begin
+flowchart LR
+    S0([ ]) -->|FrameDriver::begin| SA[SimulateA]
+    SA -->|end| SB[SimulateB]
+    SB -->|end + Release fence| H[HarvestPhase]
+    H -->|end + Acquire fence| B[BoundaryPhase]
+    B -->|run| S1([ ])
     
-    state SimulateA {
-        [*] --> Mutate: write_transform, alloc, free
-    }
-    SimulateA --> SimulateB: end()
-    
-    state SimulateB {
-        [*] --> Mutate: write_transform, alloc, free
-    }
-    SimulateB --> HarvestPhase: end() + Release fence
-    
-    state HarvestPhase {
-        [*] --> ReadOnly: spatial queries, harvest scan
-    }
-    HarvestPhase --> BoundaryPhase: end() + Acquire fence
-    
-    state BoundaryPhase {
-        [*] --> Retire: drain deferred-retire queue
-        Retire --> Compact: swap-and-pop dead rows
-        Compact --> Sync: write_buffer uploads + slot mirror scan
-    }
-    BoundaryPhase --> [*]: run()
+    subgraph SA["SimulateA"]
+        direction TB
+        SA1["write_transform, alloc, free"]
+    end
+    subgraph SB["SimulateB"]
+        direction TB
+        SB1["write_transform, alloc, free"]
+    end
+    subgraph H["HarvestPhase"]
+        direction TB
+        H1["spatial queries, harvest scan"]
+    end
+    subgraph B["BoundaryPhase"]
+        direction TB
+        B1["retire"] --> B2["compact"] --> B3["sync"]
+    end
 ```
 
 > [!WARNING]

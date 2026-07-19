@@ -95,9 +95,10 @@ function MermaidBlock({ code }: { code: string }) {
 
   const applyTransform = () => {
     if (imgRef.current) {
-      const { x, y } = dragRef.current;
+      const { panX, panY } = dragRef.current;
       const { scale } = panRef.current;
-      imgRef.current.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+      const t = `translate(${panX}px, ${panY}px) scale(${scale})`;
+      imgRef.current.style.transform = t;
     }
   };
 

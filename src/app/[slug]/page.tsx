@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getBlogIndex, getPostMeta, getPostContent, extractHeadings } from '@/utils/blog';
 import { getAuthors } from '@/utils/authors';
@@ -5,27 +6,62 @@ import BlogMarkdown from '@/components/BlogMarkdown';
 import TableOfContents from '@/components/TableOfContents';
 import AuthorAvatars from '@/components/AuthorAvatars';
 import AuthorFooter from '@/components/AuthorFooter';
+import { SITE_NAME, SITE_ORIGIN_WITH_BASE, postUrl, resolveOgImage, absoluteUrl } from '@/utils/site';
 
 const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || '';
+
+type Author = { login: string; name?: string; html_url?: string };
 
 export async function generateStaticParams() {
   const { posts } = getBlogIndex();
   return posts.map((p: { slug: string }) => ({ slug: p.slug }));
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const meta = getPostMeta(slug);
   if (!meta) return { title: 'Not Found' };
+
+  const url = postUrl(slug);
+  const image = resolveOgImage(meta.thumbnail, meta.thumbnailWidth, meta.thumbnailHeight, meta.title);
+  const authorNames: string[] = (meta.authorData?.length ? meta.authorData.map((a: Author) => a.name || a.login) : meta.author) || [];
+
   return {
     title: meta.title,
     description: meta.description,
+    authors: authorNames.map((name) => ({ name })),
+    keywords: meta.tags,
+    alternates: {
+      canonical: url,
+      // Discord looks for an oEmbed document and, when it finds one, renders
+      // the author byline above the embed title. Static JSON, generated per
+      // post at build time.
+      types: { 'application/json+oembed': `${SITE_ORIGIN_WITH_BASE}/oembed/${slug}.json` },
+    },
     openGraph: {
+      type: 'article',
+      siteName: SITE_NAME,
       title: meta.title,
       description: meta.description,
-      type: 'article',
+      url,
+      locale: 'en_US',
       publishedTime: meta.date,
+      modifiedTime: meta.date,
+      authors: authorNames,
       tags: meta.tags,
+      // Explicit dimensions let Slack, LinkedIn and Discord reserve the card
+      // layout before the image lands, instead of reflowing or giving up.
+      images: [image],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: meta.title,
+      description: meta.description,
+      images: [image.url],
+    },
+    other: {
+      // Discord surfaces this as the small grey line above the title.
+      'article:author': authorNames.join(', '),
     },
   };
 }
@@ -47,8 +83,37 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   const headings = extractHeadings(content);
   const authorList = getAuthors(meta.author || 'Pulsar Team');
 
+  // Structured data for search engines. Social scrapers ignore this and read
+  // the OG tags instead — the two describe the same post and must not disagree.
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    headline: meta.title,
+    description: meta.description,
+    image: [resolveOgImage(meta.thumbnail, meta.thumbnailWidth, meta.thumbnailHeight, meta.title).url],
+    datePublished: meta.date,
+    dateModified: meta.date,
+    author: authorList.map((a: Author) => ({
+      '@type': 'Person',
+      name: a.name || a.login,
+      url: a.html_url,
+    })),
+    publisher: {
+      '@type': 'Organization',
+      name: SITE_NAME,
+      logo: { '@type': 'ImageObject', url: absoluteUrl('/assets/pulsar.png') },
+    },
+    mainEntityOfPage: { '@type': 'WebPage', '@id': postUrl(slug) },
+    keywords: meta.tags?.join(', '),
+    wordCount: meta.wordCount,
+  };
+
   return (
     <div className="min-h-screen bg-black text-white">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
 
       {/* Post header */}
       <div className="relative border-b border-white/[0.07] overflow-hidden">

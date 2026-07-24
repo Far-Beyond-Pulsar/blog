@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { getBlogIndex } from '@/utils/blog';
 import PostCard from '@/components/PostCard';
+import { SITE_NAME, SITE_DESCRIPTION, tagUrl, resolveOgImage } from '@/utils/site';
 
 const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || '';
 
@@ -11,7 +12,38 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: { params: Promise<{ tag: string }> }) {
   const { tag } = await params;
-  return { title: `Posts tagged "${tag}"` };
+  const { posts } = getBlogIndex();
+  const count = posts.filter((p: { tags: string[] }) => p.tags.includes(tag)).length;
+
+  const title = `Posts tagged "${tag}"`;
+  const description = `${count} ${count === 1 ? 'post' : 'posts'} tagged "${tag}" on ${SITE_NAME} — ${SITE_DESCRIPTION}`;
+  const url = tagUrl(tag);
+
+  // Lead with the newest tagged post's thumbnail so a shared tag archive gets a
+  // card that reflects its contents rather than the generic site image.
+  const newest = posts.find((p: { tags: string[] }) => p.tags.includes(tag));
+  const image = resolveOgImage(newest?.thumbnail, newest?.thumbnailWidth, newest?.thumbnailHeight, title);
+
+  return {
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      type: 'website',
+      siteName: SITE_NAME,
+      title,
+      description,
+      url,
+      locale: 'en_US',
+      images: [image],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [image.url],
+    },
+  };
 }
 
 export default async function TagPage({ params }: { params: Promise<{ tag: string }> }) {

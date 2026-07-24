@@ -17,7 +17,7 @@ This post is the complete technical history of Helio's culling system: every bug
 
 ---
 
-## The Starting Point
+## Where Everything Started
 
 The original culling pipeline had exactly two passes running in sequence before the main render:
 

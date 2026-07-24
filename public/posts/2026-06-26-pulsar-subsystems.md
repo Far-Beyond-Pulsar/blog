@@ -7,7 +7,7 @@ description: "A thorough walkthrough of how Pulsar's subsystem and component arc
 thumbnail: /post_thumb/engine.png
 ---
 
-## The Problem With Knowing Too Much
+## When the Engine Knows Too Much
 
 Most game engines end up with a central god-object: an `Engine` or `World` struct that holds references to the renderer, the physics simulation, the audio system, the network layer, and anything else that has ever been needed by any feature. This works fine until the coupling becomes a real problem — when you want to run a headless simulation without the renderer, strip the audio system for a dedicated server build, or let a third-party plugin add a subsystem that the engine code has never heard of. At that point you discover that your central object has tentacles into everything and untangling it is a multi-week project.
 

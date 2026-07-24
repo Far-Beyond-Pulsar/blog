@@ -121,8 +121,7 @@ export default function TableOfContents({ headings }: { headings: Heading[] }) {
         boxShadow: scrolled ? '0 8px 32px rgba(0,0,0,0.45)' : 'none',
         backdropFilter: scrolled ? 'blur(14px)' : 'none',
         transition: 'background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, padding 0.3s ease',
-        maxHeight: scrolled ? 'calc(100vh - 100px)' : 'none',
-        overflowY: scrolled ? 'auto' : 'visible',
+        overflowY: 'visible',
         overscrollBehavior: 'contain',
         scrollbarWidth: 'thin',
         scrollbarColor: 'rgba(255,255,255,0.08) transparent',
@@ -177,7 +176,7 @@ export default function TableOfContents({ headings }: { headings: Heading[] }) {
                 <div
                   style={{
                     overflow: 'hidden',
-                    maxHeight: isOpen ? `${sec.subs.length * 32}px` : '0px',
+                    maxHeight: isOpen ? '2000px' : '0px',
                     transition: 'max-height 0.25s ease',
                   }}
                 >

@@ -1,6 +1,6 @@
 ---
 title: "SceneDB 2.0: The Cross-Device Spatial Database"
-date: "2026-07-19"
+date: "2026-07-23"
 author: ["tristanpoland", "sepehrnour"]
 tags: ["scenedb", "ecs", "gpu", "rust", "wgpu", "database", "game-engine", "rendering", "pulsar"]
 description: "A deep technical walkthrough of SceneDB 2.0, a cross-device spatial database that replaces the traditional push-model ECS with GPU-native columns, delta-minimal uploads, self-healing slot mirrors, and compile-time frame phase enforcement."
@@ -104,7 +104,7 @@ for (pos, vel) in world.query::<(&Pos, &Vel)>() {
 }
 ```
 
-It was fast for what it was. Spawn throughput hit 545 million entities per
+It was fast for what it was. Spawn throughput hit 560 million entities per
 second on the empty archetype. Query iteration ran at 84 million entities per
 second. Archetype migration ran faster than the original baseline after the
 merge-insert and `get_raw` optimizations landed. The `thread_local!` component
@@ -158,16 +158,31 @@ same field offsets, the same alignment, the same padding. The upload is a memcpy
 into a layout that is guaranteed identical to the source layout.
 
 ```rust
-// Mesh metadata: same struct, same layout, both sides
-// 72 bytes, scalar f32/u32 fields only (no vec3 to avoid 16-byte alignment)
-struct MeshMeta {
-  vertex_offset: u32,
-  index_offset: u32,
-  index_count: u32,
-  base_vertex: i32,
-  material_index: u32,
-}
+// Mesh metadata: same struct, same layout, both sides.
+// Scalar f32/u32 fields and fixed-size arrays thereof — no vec3, which would
+// carry 16-byte alignment in WGSL and shift every downstream offset.
+#[repr(C)]
+pub struct MeshMetadata {
+  pub vertex_offset: u32,           // 0
+  pub index_offset: u32,            // 4
+  pub index_count: u32,             // 8
+  pub base_vertex: i32,             // 12
+  pub material_index: u32,          // 16
+  pub lod_count: u32,               // 20
+  pub lod_distances: [f32; 4],      // 24
+  pub local_aabb_center: [f32; 3],  // 40
+  pub cluster_table_offset: u32,    // 52
+  pub local_aabb_extents: [f32; 3], // 56
+  pub meshlet_count: u32,           // 68
+} // = 72 bytes
+const _: () = assert!(std::mem::size_of::<MeshMetadata>() == 72);
 ```
+
+The `const _` assertion is the layout lock. If a field is added, reordered, or
+retyped and the total stops being 72 bytes, the crate stops compiling. A
+companion test reflects the WGSL declaration through naga and asserts the same
+size and all eighteen member offsets against the Rust side, so the two
+declarations cannot drift apart silently in either direction.
 
 The `pulsar_ecs` modules remain in the `pulsar_scenedb` crate as a reference
 implementation and migration bridge. The inheritance is structural. The new
@@ -217,19 +232,23 @@ flowchart TD
 ```
 
 ```rust
-// Helio binds SceneDB buffers, it does not own them
-let transform_buffer: &SceneBuffer<[f32; 4; 4]> = &scenedb.transforms;
-let mesh_registry:  &SceneBuffer<MeshMeta>   = &scenedb.meshes;
+// Helio binds SceneDB buffers, it does not own them. The store hands out
+// borrowed `&wgpu::Buffer` handles; there is no ownership transfer and no
+// public field to take one from.
+let transforms:  &wgpu::Buffer = store.transform_buffer();
+let slot_mirror: &wgpu::Buffer = store.slot_mirror_buffer();
+let generations: &wgpu::Buffer = store.generation_buffer();
 
 // Helio owns its scratch
-let hiz_texture: Texture = device.create_texture(&hiz_desc);
-let draw_scratch: Buffer = device.create_buffer(&scratch_desc);
+let hiz_texture: wgpu::Texture = device.create_texture(&hiz_desc);
+let draw_scratch: wgpu::Buffer = device.create_buffer(&scratch_desc);
 ```
 
 The dependency direction is enforced at the build level. `pulsar_scenedb` has no
-renderer dependency. Its GPU layer lives behind a feature gate, and CI requires
-`cargo check --no-default-features` to stay green. Helio depends on
-`pulsar_scenedb` with `features = ["gpu"]`, never the reverse. Reversing the
+renderer dependency, and its GPU layer lives behind a feature gate that is off
+by default - `default = []`, so a bare `cargo build` compiles the graphics-free
+core and nothing else. Helio depends on `pulsar_scenedb` with
+`features = ["gpu"]`, never the reverse. Reversing the
 arrow would recreate the legacy push-model in which the renderer holds a copy
 that must be reconciled every frame.
 
@@ -495,18 +514,34 @@ be handed out over the zeroed memory without per-element initialization.
 ```rust
 pub unsafe trait Pod: Copy {}
 
-unsafe impl Pod for u8 {}
-unsafe impl Pod for u16 {}
-unsafe impl Pod for u32 {}
-unsafe impl Pod for u64 {}
-unsafe impl Pod for f32 {}
-unsafe impl Pod for f64 {}
+macro_rules! impl_pod {
+  ($($t:ty),*) => { $( unsafe impl Pod for $t {} )* };
+}
+impl_pod!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64);
+
 unsafe impl Pod for [f32; 16] {}
 ```
 
-The `[f32; 16]` impl covers the 64-byte row-major mat4 transform column. This
-keeps the transform column in the graphics-free core so that `SpatialCell` does
-not depend on any GPU feature flag.
+The `[f32; 16]` impl covers the 64-byte mat4 transform column. This keeps the
+transform column in the graphics-free core so that `SpatialCell` does not depend
+on any GPU feature flag.
+
+That array is the **column-major** flattening: `array[4 * col + row] = M[row][col]`.
+This is exactly what a column-major math library's `to_cols_array()` produces
+and what WGSL's `mat4x4<f32>` expects when the buffer is read as one, so the
+shader applies `m * vec4(local, 1.0)` directly with no transpose.
+
+> [!WARNING]
+> The convention is load-bearing and the failure mode is quiet. Reading the
+> column as row-major - translation at flat indices 12..14, the 3x3 rotation
+> block written row-major - silently transposes the rotation, and the
+> world-space AABB extents come out as if built from the transpose. Probed on
+> real hardware with `Rz(30°)·Rx(40°)` (a two-axis rotation; a single-axis one
+> has `|R| == |R^T|` and cannot discriminate): the correct flattening yields
+> extent `y = 1.9417` and the instance renders, the row-major reading yields
+> `y = 1.7509` and the same instance is frustum-culled. Translation-only
+> transforms are unaffected either way, which is why nothing caught this until
+> a shader first consumed rotations.
 
 The `PageLayout` builder can fail in three ways. A capacity outside the
 `1..=1024` range returns `LayoutError::BadCapacity`. A combined element stride
@@ -526,13 +561,15 @@ fn next_multiple(n: usize, m: usize) -> usize {
 ```
 
 The total allocation size is the final cursor position after all columns are
-laid out, rounded up to 64 bytes. A page with a single `u32` column at capacity
-256 allocates `(64 + 4 * 256) = 1088` bytes, rounded to 1152. A page with a
-full 128-byte stride at capacity 1024 allocates `128 * 1024 = 131072` bytes,
-plus column-alignment padding at each column start. The padding is the price of
-cache-line-aligned column access. Every column starts at a 64-byte boundary,
-so no column's first element shares a cache line with the previous column's last
-element.
+laid out, rounded up to 64 bytes. The cursor starts at zero and the first
+column's alignment round-up is a no-op, so column zero always begins at offset
+0 and never pays padding. A page with a single `u32` column at capacity 256
+allocates `4 * 256 = 1024` bytes, already a multiple of 64. A page with a full
+128-byte stride at capacity 1024 allocates `128 * 1024 = 131072` bytes, plus
+column-alignment padding at each column start after the first. The padding is
+the price of cache-line-aligned column access. Every column starts at a 64-byte
+boundary, so no column's first element shares a cache line with the previous
+column's last element.
 
 The `Page` stores its allocation layout alongside the data pointer so that
 `Drop` can deallocate correctly. The `alloc_layout` is computed once in `new`
@@ -591,7 +628,9 @@ row's value. This avoids re-slicing every column every time a row is freed.
 
 Raw pointer access via `column_ptr` and `column_ptr_mut` is available for the
 SIMD scan engine and for the byte-wise `swap_rows` operation in the compaction
-path. These methods bypass the type check and are `pub(crate)`.
+path. Both bypass the type check. The read-only `column_ptr` is `pub`; the
+mutable `column_ptr_mut` is `pub(crate)`, so nothing outside the crate can hand
+itself a writable alias into a column.
 
 ### 1.3 CellStorage: rows, columns, and cell types
 
@@ -605,10 +644,27 @@ pub struct CellStorage {
   liveness: LivenessMask,
   registry: HandleRegistry,
   user_column_count: usize,
+  /// Token id → user-column index, for Pod columns.
   token_index: Vec<(ComponentId, usize)>,
+  /// (ComponentId, TypeId) → generic-column index, for non-Pod columns.
+  generic_token_index: Vec<(ComponentId, TypeId, usize)>,
+  /// One bit per row: set means the row is in the deferred-retirement
+  /// window and is excluded from compaction.
   pins: Vec<u64>,
 }
 ```
+
+Not every column element can be `Pod`. A column whose type owns a heap
+allocation, or has a `Drop` impl, cannot be handed out over zeroed memory.
+Those live outside the SoA page allocation in a `GenericColumn<T>`: a
+`Vec<MaybeUninit<T>>` paired with an initialization bitmap, one bit per slot,
+tracking which entries hold a valid `T`. The page carries a parallel vec of
+type-erased `Box<dyn GenericColumnAny>` handles so `push_row`, `pop_row`, and
+`swap` stay in lockstep with the Pod columns without knowing the concrete type.
+
+Generic columns are not subject to the 128-byte stride budget, because they are
+not part of the contiguous allocation the budget exists to protect. They also
+never cross the device boundary. The GPU mirror only ever reads Pod columns.
 
 Construction takes a list of user column descriptors and a capacity. The
 implicit slot ID column is prepended. The page layout is computed, the page is
@@ -808,6 +864,10 @@ fn swap_rows(&mut self, a: u32, b: u32) {
       );
     }
   }
+  // Generic columns swap through their own type-erased path.
+  for gc in self.page.generic_columns_mut() {
+    gc.swap(a, b);
+  }
 }
 ```
 
@@ -816,6 +876,14 @@ parameter. This is the same size that the layout builder used to compute column
 offsets. The swap touches every byte of both rows and leaves no half-moved
 state visible, because compaction runs at the frame boundary with no concurrent
 readers.
+
+The generic-column arm has a subtlety the Pod arm does not. Swapping two
+`MaybeUninit<T>` slots must also swap their initialization bits, or the bitmap
+stops describing the data it indexes - a slot marked initialized that holds
+uninitialized memory is a `assume_init` waiting to happen. The original
+implementation swapped the data and left the bits behind. That desync is what
+the `GenericColStress` workload in the stress TUI was built to catch, and it
+took thousands of iterations of concurrent swap pressure to surface.
 
 Two convenience accessors bridge the storage layer to external callers.
 `live_count` returns the number of rows marked alive in the liveness mask.
@@ -870,11 +938,14 @@ pub fn dead_rows(&self, len: u32) -> impl Iterator<Item = u32> + '_ {
 }
 ```
 
-This is a scalar iterator. The AVX2 compaction paths in `simd.rs` replace it
-with a `tzcnt`-based scan over the word array. It finds the next set or clear
-bit in 64-bit chunks rather than testing each row individually. The scalar
-iterator exists as a reference implementation; property tests assert bit-identical
-results between the two paths.
+This is a scalar iterator, and compaction is a scalar pass. There is no SIMD
+compaction path. The vectorized kernels in `simd.rs` are all on the query side
+(AABB scan, frustum scan, token compression), where the work is data-parallel
+over hundreds of thousands of rows per frame. Compaction is not that shape: it
+touches only as many rows as there are holes, and each move is a scattered
+byte-wise row swap plus a slot-table write, so there is nothing for a wide
+register to do. A bit-scan over the mask words would speed up finding the next
+hole, but finding holes is not where the time goes.
 
 `live_count` sums the popcount of every word. This is a harvest-phase operation
 and must not run concurrently with writers.
@@ -919,7 +990,6 @@ The registry owns the slot table. Every handle resolves through it. The registry
 is the authority on which slots are live, which row each live slot occupies, and
 what generation each slot is at.
 
-```rust
 > [!CAUTION]
 > A slot whose generation reaches `u32::MAX` is permanently retired. The slot
 > is never recycled - the handle is dead forever. In practice this requires
@@ -1109,9 +1179,10 @@ impl TypeToken {
 }
 ```
 
-`TypeToken::of::<T>()` is a const-capable factory. On first call per type per
-process, it allocates a dense `ComponentId` from the crate's sequential id
-allocator. Every subsequent call returns the same id. The `ComponentId` is the
+`TypeToken::of::<T>()` is cheap but not `const`. On first call per type per
+process it allocates a dense `ComponentId` from the crate's sequential id
+allocator, which means touching a thread-local cache and, on a cold miss, a
+global mutex. Every subsequent call returns the same id. The `ComponentId` is the
 same id-space used by the ECS's `component_id::<T>()` function, so a type that
 appears both as an ECS component and as a SceneDB column element gets the same
 identifier in both systems. No manual mapping table between the two is needed.
@@ -1149,11 +1220,12 @@ that no token is declared twice.
 pub struct CellType {
   name: &'static str,
   tokens: Vec<TypeToken>,
+  generic_entries: Vec<GenericColumnDesc>,
 }
 
 impl CellType {
   pub fn new(name: &'static str) -> Self {
-    Self { name, tokens: Vec::new() }
+    Self { name, tokens: Vec::new(), generic_entries: Vec::new() }
   }
 
   pub fn with(mut self, token: TypeToken) -> Self {
@@ -1162,13 +1234,19 @@ impl CellType {
   }
 
   pub fn build(self) -> Result<RegisteredCellType, CellTypeError> {
-    if self.tokens.is_empty() {
+    if self.tokens.is_empty() && self.generic_entries.is_empty() {
       return Err(CellTypeError::Empty);
     }
     let mut seen = std::collections::HashSet::with_capacity(self.tokens.len());
     for token in &self.tokens {
       if !seen.insert(token.id()) {
         return Err(CellTypeError::DuplicateColumn { id: token.id() });
+      }
+    }
+    // Generic entries share the same id-space and cannot clash with Pod ones.
+    for gen in &self.generic_entries {
+      if !seen.insert(gen.component_id) {
+        return Err(CellTypeError::DuplicateColumn { id: gen.component_id });
       }
     }
     let user_stride: u32 = self.tokens.iter().map(|t| t.desc().size).sum();
@@ -1185,9 +1263,12 @@ impl CellType {
 ```
 
 The stride check is holistic, counting the implicit 4-byte slot ID column plus
-every user column. The duplicate check prevents the same token type from occupying
-two columns. This is why `SpatialCell` uses positional column access for its six
-`f32` bounds columns rather than declaring them through `CellType`.
+every Pod user column, so splitting a layout into many small columns cannot be
+used to sneak past the 128-byte budget. Generic columns are exempt - they live
+outside the SoA allocation, so they cost nothing in stride. The duplicate check
+prevents the same token type from occupying two columns. This is why
+`SpatialCell` uses positional column access for its six `f32` bounds columns
+rather than declaring them through `CellType`.
 
 `CellStorage::from_cell_type` consumes a `RegisteredCellType` and builds the
 token-to-column-index map. `column_for::<T>()` resolves the type token at
@@ -1279,7 +1360,7 @@ Archetypes are the structural core of the ECS. Each archetype stores entities th
 `ArchetypeKey` represents that identity as a sorted, deduplicated `Vec<ComponentId>`. Two archetypes with the same key have the same column layout. `World` deduplicates them through `archetype_index`, a hashmap from `ArchetypeKey` to `ArchetypeId`. When `insert` needs a destination archetype, it calls `get_or_create_archetype`, which checks the index first and only allocates a new archetype for a novel key.
 
 ```rust
-pub fn get_or_create_archetype(&mut self, key: ArchetypeKey) -> ArchetypeId {
+pub(crate) fn get_or_create_archetype(&mut self, key: ArchetypeKey) -> ArchetypeId {
   if let Some(&id) = self.archetype_index.get(&key) {
     return id;
   }
@@ -1309,7 +1390,7 @@ The mask is computed once at archetype construction. It covers the first 64 comp
 The `has_columns` method uses this mask as a fast path:
 
 ```rust
-pub fn has_columns(&self, ids: &[ComponentId]) -> bool {
+pub(crate) fn has_columns(&self, ids: &[ComponentId]) -> bool {
   for &cid in ids {
     let idx = cid.0 as usize;
     if cid.0 <= 64 && (self.mask & (1u64 << (cid.0 - 1))) == 0 {
@@ -1600,7 +1681,7 @@ Two skip conditions. First, the archetype must match the query's component filte
 
 The archetype scan is linear by `archetypes` vec index. The `matches` check uses a bitmask for the first 64 component IDs, falling back to a column vec lookup beyond that range.
 
-The `fetch` implementation for `&T` is three pointer chases: index into the column vec, dereference the `Box<dyn ErasedColumn>`, and offset into the data vec. No `as_any().downcast_ref()`. No `TypeId` comparison.
+Each `fetch` implementation is three pointer chases: index into the column vec, dereference the `Box<dyn ErasedColumn>`, and offset into the data vec. No `as_any().downcast_ref()`. No `TypeId` comparison. The `&T` and `&mut T` arms are the same shape, differing only in the constness of the pointer they hand back — here is the mutable one:
 
 ```rust
 impl<'w, T: Component> WorldQuery<'w> for &'w mut T {
@@ -1722,7 +1803,7 @@ ids.dedup();
 Self(ids)
 ```
 
-The new approach avoids the sort entirely. For a component key containing N IDs, the old path does `O(log N)` for the contains check, then `O(N log N)` for the sort. The new path does `O(N)` for the contains check and `O(N)` for the merge. The improvement grows with the archetype key size.
+The new approach avoids the sort entirely. For a component key containing N IDs, the old path allocated a clone, pushed, then paid `O(N log N)` for the sort plus an `O(N)` dedup — unconditionally, even when the component was already present. The new path pays `O(N)` for the `contains` check and, only when the component is genuinely new, another `O(N)` for the merge; the already-present case short-circuits to a clone. The improvement grows with the archetype key size.
 
 `without` is simpler. It filters out the given ID and collects the rest:
 
@@ -1855,20 +1936,20 @@ The `remove` path has an additional cost. The removed component value is extract
 
 These benchmarks were measured on an AMD Ryzen 9 7950X at stock clocks. The criterion configuration uses the default profiling overhead measurement and a target coefficient of variation under 5%. All measurements are wall-clock time. Each benchmark runs until the confidence interval stabilizes.
 
-### 2.6 Defining components with SceneComponent
+### 2.6 Defining components with SceneStore
 
-A component that needs editor properties and GPU mirroring is declared with a single derive.
+A component that needs both editor properties and GPU mirroring is declared with two macros that compose cleanly, one from the engine and one from SceneDB.
 
 ```rust
-#[derive(SceneComponent)]
 #[engine_class(category = "Physics", default, clone)]
+#[derive(SceneStore)]
 pub struct RigidBody {
     #[property]
     #[gpu]
     pub transform: [f32; 16],
 
     #[property]
-    #[gpu]
+    #[gpu(mirror = DirtyTracked)]
     pub instance_info: InstanceInfo,
 
     #[property]
@@ -1879,12 +1960,13 @@ pub struct RigidBody {
 }
 ```
 
-`#[derive(SceneComponent)]` composes three concerns. `#[derive(Reflectable)]` generates
-runtime type metadata with field names, types, and byte offsets for serialization.
-`#[engine_class(...)]` registers the component with the reflection system - each
-`#[property]` field gets a getter, setter, and type info for the UI. `#[derive(SceneStore)]`
-makes `Pod`, `CellType`, and `GpuColumnSet` - every field becomes a column in SceneDB
-storage, and each `#[gpu]` field gets a GPU-resident buffer that the CPU writes into at the frame boundary.
+The two macros own different halves of the problem and neither knows about the other.
+
+`#[engine_class(...)]` is the engine's attribute macro. It registers the component with the reflection system and gives each `#[property]` field a getter, setter, and type info for the editor UI, along with whatever standard derives the argument list asks for (`default`, `clone`, and optionally `debug`, `serialize`, `deserialize`). It is what makes the component visible in the property inspector.
+
+`#[derive(SceneStore)]` is SceneDB's derive. It generates `HasTypeToken`, `Pod`, `SceneColumnSet`, and `GpuColumnSet` — every field becomes a column in SceneDB storage, and each `#[gpu]` field additionally gets a GPU-resident buffer that the CPU writes into at the frame boundary. The `#[gpu]` attribute takes an optional mirror mode: `DirtyTracked` (the default for a bare `#[gpu]`) re-syncs whenever the row is marked dirty, while `Once` uploads a single time at registration and never again — the right choice for a field that is written at spawn and then never touched.
+
+There is no single umbrella derive that does both. Keeping them separate is what lets a component be GPU-mirrored without being editor-visible, or editor-visible without ever touching the device.
 
 GPU-native fields live resident on the device. The CPU side never reads them back.
 Updates arrive as events from the simulation phase - a transform change, a mesh swap,
@@ -1894,11 +1976,15 @@ contiguous ranges and issues one `write_buffer` per range. The GPU sees the new 
 on the next dispatch. Zero CPU-side reads of GPU data.
 
 The `GpuColumnSet` descriptor list drives this at registration time. Every `#[gpu]`
-field gets a `DirtyMask` slice in the per-cell state, a `SceneBuffer<T>` region in
-the store, and a slot in the descriptor table. `write_gpu::<RigidBody>()` dispatches
-each field to its column write and dirty mark. The boundary scan reads the same
-descriptor entries to know which buffers to scan. Any `Pod` type can be a `#[gpu]`
-field. No code outside SceneDB needs to know about the sync path.
+field's type gets a `SceneBuffer<T>` in the store, registered through
+`register_gpu_buffer::<T>()` and keyed by the type's dense `ComponentId`, plus a
+`DirtyMask` at the matching key in the per-cell state. The generated
+`write_gpu::<RigidBody>()` dispatches each field to its column write and its
+dirty mark. At the boundary, `sync_all` walks that same per-cell dirty-column
+table, and for each entry looks up the buffer by `ComponentId` and the CPU bytes
+by the same key - one keyed lookup, three structures that cannot drift because
+they share the identifier. Any `Pod` type can be a `#[gpu]` field. No code
+outside SceneDB needs to know about the sync path.
 
 GPU-native fields are immutable on the GPU between boundaries - the shader reads them,
 the CPU queues updates, and the boundary applies them. This means a `#[gpu]` field
@@ -1931,7 +2017,18 @@ The GPU layer is where SceneDB earns its name. Everything upstream exists to fee
 
 ### 3.1 SceneGpuStore - the cross-device bridge
 
-`SceneGpuStore` owns five persistent buffers: transform SSBO, instance-info SSBO, slot-mirror SSBO, generation buffer, and a per-cell metadata buffer. All five are allocated once and never reallocate.
+`SceneGpuStore` owns the persistent device buffers. Three are fixed and named, because the store itself depends on them: the slot-mirror SSBO, the generation buffer, and a per-cell metadata buffer. The mirrored data columns are not fixed. They live in a type-erased map keyed by `ComponentId`:
+
+```rust
+gpu_buffers: HashMap<ComponentId, Box<dyn GpuBufferDispatch>>,
+slot_mirror: SceneBuffer<u32>,
+generations: GenerationBuffer,
+cell_metadata: wgpu::Buffer,
+```
+
+An earlier revision had `transforms` and `instance_infos` as concrete named fields. That worked exactly as long as those two were the only mirrored columns, and stopped working the moment a component wanted to mirror a third. The map generalizes it: any `Pod` column type registers a `SceneBuffer<T>` under its dense id, and the boundary sync iterates whatever is registered rather than a hardcoded pair. Transforms and `InstanceInfo` are still registered automatically at construction, and convenience accessors — `transform_buffer()`, `instance_info_buffer()` — still resolve them by id, so the common path reads the same as before.
+
+Every buffer is allocated once and never reallocates.
 
 The store splits its row space into regions. Each cell gets a disjoint slice of each buffer. Rows live in `[row_base, row_base + capacity)` in the transform, instance-info, and slot-mirror buffers. Slots live in `[slot_base, slot_base + capacity + 64)` in the generation buffer, with the 64-slot headroom absorbing retired-but-not-yet-recycled slots.
 
@@ -2044,7 +2141,9 @@ if let Some(start) = run_start {
 dirty.clear_all();
 ```
 
-Each flush computes the byte range from the region base, multiplies by element stride, and calls `queue.write_buffer`. The returned `SyncStats` records ranges and total bytes for instrumentation and alloc-gate tests. A frame with no changes issues zero `write_buffer` calls. Three dirty masks exist per cell: transforms, instance-infos, and slots. The transform and instance-info masks are marked by write calls and compaction. The slot mask is marked only by the boundary scan.
+Each flush computes the byte range from the region base, multiplies by element stride, and calls `queue.write_buffer`. The returned `SyncStats` records ranges and total bytes for instrumentation and alloc-gate tests. A frame with no changes issues zero `write_buffer` calls.
+
+A cell carries one dirty mask per mirrored column, held in a dense table indexed by `ComponentId`, plus one dedicated mask for the slot mirror. The column masks are marked by write calls and by compaction. The slot mask is different: it is marked only by the boundary scan, never by a write. Section 3.3 covers why that asymmetry is the whole point.
 
 ### 3.3 The self-healing slot mirror
 
@@ -2154,13 +2253,16 @@ flowchart LR
 ```
 
 ```rust
-slot.cell.compact_report(|from, to| {
-  state.dirty_transforms.mark(to);
-  state.dirty_infos.mark(to);
+slot.cell.compact_report(|_from, to| {
+  for mask in state.dirty_columns.iter().flatten() {
+    mask.mark(to);
+  }
 });
 ```
 
-The callback marks the destination row dirty in the transform and instance-info masks. The source row already has whatever dirty state it carried. After compaction the next sync uploads both the moved row's new position and any dirty bits from the old position.
+The callback marks the destination row dirty in every registered column mask — a moved row carries all of its mirrored columns to the new position, so all of them need re-uploading. The source row already has whatever dirty state it carried. After compaction the next sync uploads both the moved row's new position and any dirty bits from the old position.
+
+The slot mirror is deliberately absent from that loop. It is not marked here, because `sync_all`'s boundary scan detects moved slots on its own.
 
 The slot registry absorbs the redirect. `HandleRegistry::compact` updates the slot-to-row mapping for every moved handle. The handle itself never changes - it still carries the same slot index and generation. A query that resolves the handle to a row gets the new position automatically. The slot column is updated atomically with the move.
 
@@ -2172,13 +2274,16 @@ pub(crate) fn compact_all_gated(
   cells: &mut [CellSlot<'_>],
   mut ready: impl FnMut(CellId) -> bool,
 ) {
+  debug_assert_eq!(self.phase, Phase::Retired, "compact_all must follow retire_all");
+  self.phase = Phase::Compacted;
   for slot in cells.iter_mut() {
     if !ready(slot.id) { continue; }
     let state = self.cells[slot.id.0 as usize]
       .as_ref().expect("cell unregistered");
     slot.cell.compact_report(|_from, to| {
-      state.dirty_transforms.mark(to);
-      state.dirty_infos.mark(to);
+      for mask in state.dirty_columns.iter().flatten() {
+        mask.mark(to);
+      }
     });
   }
 }
@@ -2331,7 +2436,7 @@ The harvest pass runs after simulation on read-only data. It scans every cell's 
 
 The Density Efficiency Index selects between plain and DEI-compacted paths. When DEI drops below 0.25, a SIMD compress-store path replaces the plain filter-and-offset scan and appends a remap-table segment. The NULL_ROW sentinel is dropped before the offset addition in both paths.
 
-`HarvestStaging` is persistent across frames. Vecs are cleared but never deallocated. A decay policy prevents burst inflation: if peak usage over the last 8 frames stays below 50% of capacity, the buffer is halved.
+`HarvestStaging` is persistent across frames. `clear()` truncates every token and generation vec to zero length but keeps the capacity, so a steady-state frame does no allocation at all. There is no shrink path: a burst frame that grows the staging arrays leaves them grown for the rest of the process. That is a deliberate trade — the arrays are bounded by the largest view's hit count, and reclaiming them would mean paying the reallocation again on the next burst.
 
 `ViewTokenBuffers` is the device-side landing point for the staging arrays. It owns two SSBOs per class - one for tokens, one for expected generations. It grows on demand with a 1.5x factor and never shrinks. Upload issues two `write_buffer` calls per non-empty class column.
 
@@ -2408,7 +2513,9 @@ Results across three scene sizes and five mutation rates:
 | 100,000 | 10 | 290.25 / 307.40 us | 1,016.99 / 1,299.70 us | 3.50x | 640,000 | 6,422,528 | 10.04x | 10 |
 | 100,000 | 100 | 1,467.40 / 2,015.70 us | 1,016.99 / 1,299.70 us | 0.69x | 6,400,000 | 6,422,528 | 1.00x | 98 |
 
-At 0.1% mutation on 100k objects, SceneDB transfers 6,400 bytes against legacy's 6.4 MB - a 1,003x bandwidth reduction. CPU time is 172 us against 1,017 us, a 5.9x speedup. At 1,000 objects the improvement is 1.07x to 1.57x; absolute costs land at single-digit microseconds where the fixed boundary overhead dominates. The crossover where delta stops winning on CPU time sits at M=100% for S=10,000 and S=100,000.
+At 0.1% mutation on 100k objects, SceneDB transfers 6,400 bytes against legacy's 6.4 MB - a 1,003x bandwidth reduction. CPU time is 172 us against 1,017 us, a 5.9x speedup. At 1,000 objects the picture is muted: 3.46x at zero mutation, but only 1.02x to 1.57x once anything is moving, with absolute costs in single-digit microseconds where the fixed boundary overhead dominates.
+
+The crossover where delta stops winning on CPU time sits at M=100% at every scene size - 0.37x at S=1,000, 0.76x at S=10,000, 0.69x at S=100,000. This is the expected shape, not a defect. When every row is dirty, delta-sync does all the work a full upload does and then pays extra for the run-coalescing scan and the per-range `write_buffer` calls on top. Note that the small scene loses hardest: at S=1,000 the fixed overhead is a larger fraction of a smaller total. A scene that genuinely rewrites every transform every frame should upload the whole buffer, and the byte-ratio column shows why the delta path never gets to claim a bandwidth win there either - 1.00x to 1.02x.
 
 The scattered-vs-contiguous comparison at S=10000, M=1%:
 
@@ -2430,7 +2537,7 @@ The GPU-ns pair at S=10000, M=1% amplifies 32 copies of the scene to overcome th
 | 256,000 | 1.0951 | 0.6590 | 1.66x | 3.5780 | 1.1570 | 3.09x |
 | 1,000,448 | 1.1013 | 0.6132 | 1.80x | 3.5934 | 1.1572 | 3.11x |
 
-All scan sizes fit in the 96 MB L3 cache. The kernels are compute-bound at every tier.
+Even the largest tier fits in L3. At 1,000,448 rows the six `f32` bounds columns are 24 bytes per row (about 23 MiB) and the output token array adds another 4 bytes per row (about 3.8 MiB), for a working set near 27 MiB against the 7950X's 64 MB L3. The near-flat ns/row across a thousand-fold range in N is the tell: the kernels are compute-bound at every tier, not memory-bound.
 
 **gpu_timing.rs**
 
@@ -2468,17 +2575,22 @@ SceneDB ships as a single crate. The core has zero GPU dependencies. The `gpu` f
 
 ```toml
 [features]
-default = []
-gpu = ["dep:wgpu"]
+default   = []
+gpu       = ["dep:wgpu"]
+telemetry = ["dep:socket2", "dep:serde", "gpu"]
 
 [dependencies]
-pulsar_core    = { workspace = true }
-pulsar_reflection = { workspace = true }
-ahash       = "0.8"
-profiling     = { workspace = true }
-tracing      = { workspace = true }
-wgpu        = { version = "30", optional = true }
+pulsar_reflection = { git = "...", rev = "cf37ed0" }
+profiling         = { git = "...", rev = "12424a5" }
+serde_json        = { workspace = true }
+tracing           = { workspace = true }
+ahash             = "0.8"
+socket2           = { workspace = true, optional = true }
+serde             = { workspace = true, optional = true }
+wgpu              = { version = "30", optional = true }
 ```
+
+Three features, and the default is the empty set. `gpu` pulls in wgpu and the device-resident store. `telemetry` implies `gpu` — there is nothing to report on without it — and adds the socket and serialization deps the dashboard feed needs.
 
 `cargo check --no-default-features` passes on any target that supports std. No GPU crate, no GPU API, no platform-specific install. The core compiles on macOS without Metal, on Linux without Vulkan drivers, on Windows without DX12 SDK headers. A headless server, a build farm node, or an editor running in non-rendering mode all use the same binary path.
 
@@ -2503,7 +2615,21 @@ required-features = ["gpu"]
 [[test]]
 name = "gpu_assets"
 required-features = ["gpu"]
+
+[[test]]
+name = "gpu_harvest"
+required-features = ["gpu"]
+
+[[test]]
+name = "alloc_gate_gpu"
+required-features = ["gpu"]
+
+[[test]]
+name = "stress_gpu"
+required-features = ["gpu"]
 ```
+
+The two GPU benchmarks, `gpu_timing` and `legacy_model_bench`, carry the same gate.
 
 The wgpu dependency is optional and version-pinned independently - SceneDB does not use the workspace-level wgpu fork.
 
@@ -2511,13 +2637,15 @@ This split is the foundation for every cross-device claim. The CPU side is autho
 
 ### 4.2 Rust to WGSL to backends
 
-The slot mirror is the canonical example. On the Rust side it is a `SceneBuffer<u32>` with `T: Pod`, allocated once at capacity and never resized. On the WGSL side it is a `binding_array<storage, u32>`.
+The slot mirror is the canonical example. On the Rust side it is a `SceneBuffer<u32>` with `T: Pod`, allocated once at capacity and never resized. On the WGSL side it is a read-only storage array of `u32`.
 
 ```wgsl
-@group(1) @binding(3) var<storage> slot_mirror: binding_array<u32>;
+@group(0) @binding(4) var<storage, read> slot_mirror: array<u32>;
 ```
 
 Both sides see the same 64-byte aligned SoA layout. The WGSL struct uses scalar fields exclusively - never `vec3<f32>`, which carries 16-byte alignment in WGSL and would shift every downstream offset relative to the Rust side.
+
+That layout equivalence is not asserted by hand. SceneDB's `gpu_layout` test declares the WGSL for every shared struct, parses it with naga, runs naga's own `Layouter` over it, and asserts the reflected size and every member offset against `size_of` and the Rust field order. `MeshMetadata` is checked at 72 bytes across all eighteen WGSL members — the Rust side declares eleven fields, three of which are fixed-size arrays that the shader spells out as individual scalars, which is exactly the kind of divergence a size-only check would wave through. `ClusterNode` is checked at 48, `MeshletEntry` at 32, `MaterialRow` at 64, `InstanceInfo` at 8, and the instance transform at 64. If either side moves a field, the test fails on the offset that shifted.
 
 The phase machine enforces a different kind of cross-device contract. On the CPU side, `SimulateA` and `SimulateB` implement a sealed `SimulateWitness` trait. `write_transform` takes `&impl SimulateWitness`. A `HarvestPhase` reference fails to compile where a `SimulateA` reference passes. No external code can implement the sealed trait.
 
@@ -2527,15 +2655,16 @@ The Rust compiler enforces the phase machine. The GPU driver enforces the timeli
 
 Translated across all four backends:
 
-| Concept     | Rust                  | WGSL (all backends)        |
-| --------------- | --------------------------------------- | --------------------------------- |
-| Slot mirror   | `SceneBuffer<u32>`           | `binding_array<storage, u32>`   |
-| Generations   | `GenerationBuffer<u32>`         | `binding_array<storage, u32>`   |
-| Transform    | `&[[f32; 16]]` column          | `array<mat4x4<f32>>`       |
-| Phase witness  | Sealed trait + `compile_fail`      | Not present            |
-| Serial safety  | `SubmissionTracker` + callback     | Timeline semaphore / queue serial |
-| Layout proof  | `offset_of!` + `size_of`        | naga reflection (Test 3)     |
-| Stride contract | 64-byte aligned SoA, 128 B max per cell | Scalar fields only        |
+| Concept | Rust | WGSL (all backends) |
+| --- | --- | --- |
+| Slot mirror | `SceneBuffer<u32>` | `var<storage, read> array<u32>` |
+| Generations | `GenerationBuffer` | `var<storage, read> array<u32>` |
+| Transform | `&[[f32; 16]]` column | `var<storage, read> array<mat4x4<f32>>` |
+| Mesh registry | `&[MeshMetadata]` (72 B) | `var<storage, read> array<MeshMetadata>` |
+| Phase witness | Sealed trait + `compile_fail` | Not present |
+| Serial safety | `SubmissionTracker` + callback | Timeline semaphore / queue serial |
+| Layout proof | `size_of` + `const _` assert | naga reflection (Test 3) |
+| Stride contract | 64-byte aligned SoA, 128 B max per cell | Scalar fields only |
 
 The shader never inspects phase state. It reads buffers. The phase machine is a CPU abstraction that translates to a submission ordering constraint. WGSL does not need sealed traits because the shader never needs to know which phase is running.
 
@@ -2553,29 +2682,32 @@ No struct-by-struct serialization. No encoding pass. The byte representation is 
 
 Every SceneDB GPU buffer uses storage usage flags.
 
-- **Transform buffer**: wgpu `BufferUsages::STORAGE | COPY_DST | COPY_SRC`. Vulkan: `VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT`. Metal: `MTLResourceUsageStorage` with `MTLResourceStorageModePrivate`. DX12: `D3D12_RESOURCE_STATE_UNORDERED_ACCESS` (read via `SRV`). WebGPU: `GPUBufferUsage::STORAGE | COPY_DST`.
-- **Generation buffer**: identical usage, with `COPY_SRC` for the CPU readback path.
-- **Slot mirror**: identical usage.
-- **Mesh configurator, material buffer, cluster DAG, meshlet buffer**: identical usage.
+Every SceneDB buffer is created with the same base triple, `STORAGE | COPY_DST | COPY_SRC`. `COPY_DST` is the upload path. `COPY_SRC` is uniform across all of them so that any buffer can be copied out for a debug capture or an integration test's readback, not because any of them is read back in the steady state.
+
+- **Transform buffer**: wgpu `BufferUsages::STORAGE | COPY_DST | COPY_SRC`. Vulkan: `VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT`. Metal: `MTLResourceUsageStorage` with `MTLResourceStorageModePrivate`. DX12: `D3D12_RESOURCE_STATE_UNORDERED_ACCESS` (read via `SRV`). WebGPU: `GPUBufferUsage::STORAGE | COPY_DST | COPY_SRC`.
+- **Generation buffer, slot mirror, cell metadata**: identical usage.
+- **Mesh registry, material registry, cluster DAG, meshlet buffer**: identical usage.
 - **GeometryArena vertex buffer**: adds `VERTEX` usage.
 - **GeometryArena index buffer**: adds `INDEX` usage.
 
 No buffer uses `UNIFORM`. The 64 KB uniform buffer limit on many GPUs would cap scene size. No buffer uses `INDIRECT` indirect draw buffers are Helio-owned per-frame scratch, not SceneDB-owned scene state.
 
-The bind group is the same across all backends.
+The bind group is the same across all backends. It is declared once, on the renderer side, in the `helio-scenedb` seam crate that sits between the two systems - SceneDB itself ships no shaders, only the buffers and the layout contract they honour.
 
 ```wgsl
-@group(1) @binding(0) var<storage> instance_transforms: binding_array<mat4x4<f32>>;
-@group(1) @binding(1) var<storage> instance_info:    binding_array<InstanceInfo>;
-@group(1) @binding(2) var<storage> generations:     binding_array<u32>;
-@group(1) @binding(3) var<storage> slot_mirror:     binding_array<u32>;
-@group(1) @binding(4) var<storage> mesh_config:     binding_array<MeshMetadata>;
-@group(1) @binding(5) var<storage> materials:      binding_array<MaterialRow>;
-@group(1) @binding(6) var<storage> cluster_dag:     binding_array<ClusterNode>;
-@group(1) @binding(7) var<storage> meshlets:      binding_array<MeshletEntry>;
+@group(0) @binding(0) var<storage, read> instance_transforms: array<mat4x4<f32>>;
+@group(0) @binding(1) var<storage, read> instance_info:       array<InstanceInfo>;
+@group(0) @binding(2) var<storage, read> generations:         array<u32>;
+@group(0) @binding(3) var<storage, read> slot_mirror:         array<u32>;
+@group(0) @binding(4) var<storage, read> mesh_config:         array<MeshMetadata>;
+@group(0) @binding(5) var<storage, read> materials:           array<MaterialRow>;
+@group(0) @binding(6) var<storage, read> cluster_dag:         array<ClusterNode>;
+@group(0) @binding(7) var<storage, read> meshlets:            array<MeshletEntry>;
 ```
 
-Eight storage buffers. WebGPU's default per-stage limit is 8. The bind group fits. If a backend supports more (Vulkan exposes up to hundreds of thousands of descriptor slots), Helio can use them for its own derived buffers. SceneDB does not need to change.
+Every entry is `read`. Nothing GPU-side ever writes back into a SceneDB buffer, which is what makes the CPU column unambiguously the source of truth — and, incidentally, what makes it sound for the sync path to re-upload a clean row's bytes if a coalescing heuristic ever decides to.
+
+Eight storage buffers. WebGPU's default per-stage limit is 8. The bind group fits, exactly. If a backend supports more (Vulkan exposes far higher descriptor limits), Helio can use them for its own derived buffers. SceneDB does not need to change.
 
 The dirty mask never crosses the device boundary. It lives on the CPU side in `CellGpuState`, implemented as a `bitvec`-compatible word array indexed by row. At the frame boundary, `sync_all` iterates the mask, coalesces adjacent marked rows into ranges, and issues one `queue.write_buffer` per range. The GPU receives only the payload bytes.
 
@@ -2605,7 +2737,7 @@ pub fn sync_region(
 
 No mask upload. No per-row flags in the buffer. No GPU-side tracking. The `SyncStats` struct records ranges and bytes. Zero dirty rows means zero GPU writes. The coalescing pass produces at most one write per dirty segment. At 0.1% mutation on 100k rows, that is a handful of segments typically one or two.
 
-The generation buffer readback is the only path where data flows GPU-to-CPU. `queue.on_submitted_work_done` fires a callback when the GPU completes the submission. The callback marks the serial as complete. `BoundaryPhase::retire` polls completed serials, drains the deferred-retire queue, and writes new generation values into the host-side registry. The GPU-side generation buffer is updated by the next `write_buffer` call. No GPU-side buffer readback is needed the generation buffer write is purely CPUGPU, driven by the serial completion signal.
+No scene data ever flows GPU-to-CPU. The only thing crossing back is a signal, not a payload: `queue.on_submitted_work_done` fires a callback when the GPU finishes a submission, and the callback marks that serial complete. `BoundaryPhase::retire` polls the completed watermark, drains the deferred-retire queue, and writes the new generation values into the host-side registry and out to the device with an ordinary `write_buffer`. The generation buffer is written CPU-to-GPU only, gated on the completion signal. There is no map, no readback, no stall — which is why the retirement path costs nothing on the frame it runs.
 
 Bindless limits, indirect draw counts, and texture format support all differ across Vulkan, Metal, DX12, and WebGPU. SceneDB does not care about any of them. It produces one bind group layout, eight storage buffers, and a single `write_buffer` path for uploads. Cross-platform complexity lives in Helio. SceneDB's eight buffers are eight buffers on every backend.
 
@@ -2613,17 +2745,33 @@ A frame that renders identically on Vulkan and WebGPU is the architectural outco
 
 The CPU is authority. The GPU is mirror. Every backend sees the same mirror.
 
-## 5. GPU-Driven Culling and Indirect Draw
+## 5. What Consumes This: GPU-Driven Culling and Indirect Draw
+
+Everything to this point ships in `pulsar_scenedb` today. This section is the
+other side of the seam - the consumer design the store was built to feed. The
+shaders described here are Helio's, not SceneDB's; the repository contains no
+`.wgsl` files at all, only the buffers, the layout contract, and the naga
+reflection tests that hold the two declarations together. It is included
+because the store's shape is otherwise unmotivated: the generation buffer, the
+slot mirror, and the aligned expected-generation column exist for exactly the
+validation described below, and are hard to justify without it.
 
 ### 5.1 The Cull Pass
 
 The cull pass runs once per view. The compute shader receives a dense token
-array and aligned expected-generation column from `view_upload.rs`. Each thread
-validates one token: `generations[slot_mirror[row]]` must equal
-`expected_gen[i]`. A mismatch drops the token. The generation check passes,
-then the shader reads `InstanceInfo.mesh_index`, bounds-checks it against the
-mesh table length, fetches the local AABB, computes world-space AABB, runs the
-near-plane pre-test, and evaluates frustum culling against six view planes.
+array and aligned expected-generation column from `view_upload.rs` - that half
+is real and shipping, and is what §3.10 harvests into. Each thread validates
+one token: `generations[slot_mirror[row]]` must equal `expected_gen[i]`. A
+mismatch means the slot was retired or recycled since harvest, and the token is
+dropped. Once the generation check passes, the shader reads
+`InstanceInfo.mesh_index`, bounds-checks it against the mesh table length,
+fetches the local AABB, computes the world-space AABB, runs the near-plane
+pre-test, and evaluates frustum culling against six view planes.
+
+The bounds check on `mesh_index` is not defensive padding. A row in a recycled
+region that was never written may still hold a prior tenant's bytes, so
+`mesh_index` is untrusted until the row has passed both the liveness gate and
+the generation check - the shader treats it as adversarial input.
 
 Survivors need a draw command. The shader performs a bounded atomic allocation
 against a per-view command counter. If the slot is within `MAX_BUFFER_CAPACITY`,

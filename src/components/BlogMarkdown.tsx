@@ -11,6 +11,7 @@ import rehypeKatex from 'rehype-katex';
 import { visit } from 'unist-util-visit';
 import type { Plugin } from 'unified';
 import type { Root } from 'mdast';
+import { BASE_PATH } from '@/utils/site';
 import 'katex/dist/katex.min.css';
 
 // Lazy-load Monaco so it doesn't inflate the initial bundle
@@ -342,18 +343,70 @@ function AlertBlock({ alertType, children }: { alertType: string; children?: Rea
   );
 }
 
+/** Left alone: absolute URLs, protocol-relative, data URIs, anchors, mail/tel. */
+const NON_RELATIVE = /^([a-z][a-z0-9+.-]*:|\/\/|#)/i;
+
+/**
+ * Collapse "." and ".." segments so the emitted URL is the real path rather
+ * than something the browser has to normalise (".../slug/../foo.png").
+ */
+function normalizePath(path: string): string {
+  const out: string[] = [];
+  for (const segment of path.split('/')) {
+    if (segment === '.' || segment === '') continue;
+    if (segment === '..') out.pop();
+    else out.push(segment);
+  }
+  return '/' + out.join('/');
+}
+
+/**
+ * Resolve a post-relative asset reference to a deployable absolute path.
+ *
+ * Folder posts keep their images beside the markdown and reference them as
+ * "./assets/foo.png". Those files are copied to /posts/<slug>/assets/foo.png,
+ * which under a basePath deployment is served from <base>/posts/<slug>/...
+ * Forgetting the base yields a URL that resolves fine on a local dev server
+ * mounted at the root and 404s in production — so the base is applied here,
+ * once, for every reference the markdown can contain.
+ */
+function resolveAssetUrl(url: string, slug: string, base: string): string {
+  if (!url || NON_RELATIVE.test(url)) return url;
+
+  // Post-relative ("./x", "../x") — resolve against the post's own folder.
+  if (url.startsWith('./') || url.startsWith('../')) {
+    return base + normalizePath(`/posts/${slug}/${url}`);
+  }
+
+  // Root-relative ("/post_thumb/x.png") — already site-absolute, just needs
+  // the base, and must not get it twice.
+  if (url.startsWith('/')) {
+    if (base && (url === base || url.startsWith(`${base}/`))) return url;
+    return base + url;
+  }
+
+  // Bare relative ("assets/foo.png") — same folder as the post.
+  return base + normalizePath(`/posts/${slug}/${url}`);
+}
+
 function remarkRewriteRelative(slug: string): Plugin<[], Root> {
-  const prefix = `/posts/${slug}/`;
   return () => (tree) => {
     visit(tree, ['image', 'link'], (node: any) => {
-      if (node.url && (node.url.startsWith('./') || node.url.startsWith('../'))) {
-        node.url = prefix + node.url.replace(/^\.\//, '');
+      if (typeof node.url === 'string') {
+        node.url = resolveAssetUrl(node.url, slug, BASE_PATH);
       }
     });
+    // Raw HTML blocks bypass the mdast node types above, so src/href inside
+    // them are rewritten textually. Both quote styles, both relative forms.
     visit(tree, 'html', (node: any) => {
-      if (typeof node.value === 'string') {
-        node.value = node.value.replace(/(src|href)="\.\//g, `$1="${prefix}`);
-      }
+      if (typeof node.value !== 'string') return;
+      node.value = node.value.replace(
+        /\b(src|href)=("|')([^"']+)\2/g,
+        (match: string, attr: string, quote: string, value: string) => {
+          const resolved = resolveAssetUrl(value, slug, BASE_PATH);
+          return resolved === value ? match : `${attr}=${quote}${resolved}${quote}`;
+        },
+      );
     });
   };
 }

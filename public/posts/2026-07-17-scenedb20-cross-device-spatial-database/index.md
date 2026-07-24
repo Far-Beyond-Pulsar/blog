@@ -1934,7 +1934,7 @@ Each migration also incurs the erased column overhead. Every component on the en
 
 The `remove` path has an additional cost. The removed component value is extracted via `swap_remove_erased` before migration begins. The value is unboxed and returned to the caller as `Option<T>`. If the caller discards the value, the drop runs normally. If the caller stores it, no extra copy occurs.
 
-These benchmarks were measured on an AMD Ryzen 9 7950X at stock clocks. The criterion configuration uses the default profiling overhead measurement and a target coefficient of variation under 5%. All measurements are wall-clock time. Each benchmark runs until the confidence interval stabilizes.
+These benchmarks were measured on an AMD Ryzen 9 9950X3D at stock clocks. The criterion configuration uses the default profiling overhead measurement and a target coefficient of variation under 5%. All measurements are wall-clock time. Each benchmark runs until the confidence interval stabilizes.
 
 ### 2.6 Defining components with SceneStore
 
@@ -2537,7 +2537,7 @@ The GPU-ns pair at S=10000, M=1% amplifies 32 copies of the scene to overcome th
 | 256,000 | 1.0951 | 0.6590 | 1.66x | 3.5780 | 1.1570 | 3.09x |
 | 1,000,448 | 1.1013 | 0.6132 | 1.80x | 3.5934 | 1.1572 | 3.11x |
 
-Even the largest tier fits in L3. At 1,000,448 rows the six `f32` bounds columns are 24 bytes per row (about 23 MiB) and the output token array adds another 4 bytes per row (about 3.8 MiB), for a working set near 27 MiB against the 7950X's 64 MB L3. The near-flat ns/row across a thousand-fold range in N is the tell: the kernels are compute-bound at every tier, not memory-bound.
+Even the largest tier fits in L3. At 1,000,448 rows the six `f32` bounds columns are 24 bytes per row (about 23 MiB) and the output token array adds another 4 bytes per row (about 3.8 MiB), for a working set near 27 MiB. The 9950X3D advertises 128 MB of L3, but that figure is the sum across two CCDs and no single core sees all of it - the relevant number for a single-threaded scan is the 96 MB on the V-Cache die (32 MB base plus 64 MB stacked), against which 27 MiB has better than 3x headroom. The near-flat ns/row across a thousand-fold range in N is the tell: the kernels are compute-bound at every tier, not memory-bound.
 
 **gpu_timing.rs**
 

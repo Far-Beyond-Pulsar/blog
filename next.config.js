@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   output: process.env.NEXT_PUBLIC_DISABLE_EXPORT ? undefined : 'export',
-  distDir: '.next',
+  distDir: 'out',
   images: {
     unoptimized: true,
   },

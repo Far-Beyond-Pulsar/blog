@@ -979,20 +979,20 @@ The execute method in `pass.rs` records four compute passes in sequence on `ctx.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Stage 1: cs_place                                       │
-│  One workgroup per queued tile (≤24)                     │
-│  Evaluates stratified candidates, writes arena slabs     │
+│  Stage 1: cs_place                                      │
+│  One workgroup per queued tile (≤24)                    │
+│  Evaluates stratified candidates, writes arena slabs    │
 ├─────────────────────────────────────────────────────────┤
-│  Stage 2: cs_tile_cull                                   │
-│  One lane per resident tile                              │
-│  Frustum + Hi-Z occlusion test on tile AABB              │
+│  Stage 2: cs_tile_cull                                  │
+│  One lane per resident tile                             │
+│  Frustum + Hi-Z occlusion test on tile AABB             │
 ├─────────────────────────────────────────────────────────┤
-│  Stage 3: cs_cluster_cull                                │
-│  One lane per 4×4 blade cluster                          │
-│  Frustum + Hi-Z + LOD classification, append to buckets  │
+│  Stage 3: cs_cluster_cull                               │
+│  One lane per 4×4 blade cluster                         │
+│  Frustum + Hi-Z + LOD classification, append to buckets │
 ├─────────────────────────────────────────────────────────┤
-│  Stage 4: cs_finalize                                    │
-│  Single workgroup: convert counters → DrawIndirectArgs   │
+│  Stage 4: cs_finalize                                   │
+│  Single workgroup: convert counters → DrawIndirectArgs  │
 └─────────────────────────────────────────────────────────┘
 ```
 

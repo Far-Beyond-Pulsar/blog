@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "prebuild": "npm run generate:index",
-    "predev": "npm run generate:index",
-    "generate:index": "node scripts/fetch-authors.js && node scripts/generate-blog-index.js",
-    "fetch:authors": "node scripts/fetch-authors.js"
+    "prebuild": "bun run generate:index",
+    "predev": "bun run generate:index",
+    "generate:index": "bun scripts/fetch-authors.js && node scripts/generate-blog-index.js",
+    "fetch:authors": "bun scripts/fetch-authors.js"
   },
   "dependencies": {
     "@fontsource/opendyslexic": "^5.2.5",

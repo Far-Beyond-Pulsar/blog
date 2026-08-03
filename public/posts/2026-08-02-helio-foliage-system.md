@@ -17,13 +17,13 @@ thumbnail: /post_thumb/foliage.png
 
 ## Introduction
 
-A single blade of grass is a triangle strip that costs nothing — eleven vertices, no index buffer, `TriangleStrip` topology, four bytes per instance. But a million of them, spread across a 120-metre radius around the camera, each moving in the wind, each casting a shadow, each occlusion-culled against the previous frame's depth, each writing a correct velocity so temporal anti-aliasing does not smear it into a green blur — that is not one problem. It is seven problems stacked on top of each other, and if any one of them is solved wrong, the result looks like a game from 2007.
+A single blade of grass is a triangle strip that costs nothing. Eleven vertices, no index buffer, `TriangleStrip` topology, four bytes per instance. A million of them spread across a 120-metre radius around the camera. Each moves in the wind. Each casts a shadow. Each is occlusion-culled against the previous frame's depth. Each writes a correct velocity so temporal anti-aliasing does not smear it into a green blur. That is not one problem. It is seven problems stacked on top of each other. Solve any one wrong and the result looks like a game from 2007.
 
-The fundamental tension is this: foliage is the most geometry-dense thing a renderer ever draws, but it is also the least important thing to draw correctly. A rock that pops is a bug. A blade of grass that pops is barely noticeable; a thousand blades that pop in unison are a shimmer that the eye picks up instantly even when the conscious brain does not register it. Foliage rendering is therefore a war of attrition against perceptible artefacts — not against absolute correctness, but against the specific failure modes that human peripheral vision is tuned to detect: sudden disappearance, coherent motion that does not match the wind direction, and edges that flicker under camera motion.
+Foliage is the most geometry-dense thing a renderer ever draws. It is also the least important thing to draw correctly. A rock that pops is a bug. A blade of grass that pops is barely noticeable. A thousand blades that pop in unison create a shimmer the eye picks up instantly even when the conscious brain does not register it. Foliage rendering is a war of attrition against perceptible artefacts. Human peripheral vision is tuned to detect sudden disappearance, coherent motion that does not match the wind direction, and edges that flicker under camera motion.
 
 UE5 does not solve all of these. UE5's grass path places instances on the CPU, culls them by distance and frustum only, writes no motion vectors, and pops blades out at the cull distance with no fallback. UE5's documentation calls this acceptable. We do not agree.
 
-This post is the complete technical story behind Helio's foliage system — why we built it, how every struct and shader is packed, the tile ring residency cache that makes steady-state placement free, the three-band wind model with correct motion vectors, the interaction field that bends grass underfoot, and the rasterisation path that draws a million blades in four draw calls.
+This post is the complete technical story behind Helio's foliage system. Why we built it. How every struct and shader is packed. The tile ring residency cache that makes steady-state placement free. The three-band wind model with correct motion vectors. The interaction field that bends grass underfoot. The rasterisation path that draws a million blades in four draw calls.
 
 Every struct, every budget number and every failure mode below is taken from the implementation plan and the source code that already exists in `helio-foliage-core`, `helio-pass-foliage-place`, and `helio-pass-foliage-gbuffer`.
 
@@ -49,7 +49,7 @@ Every struct, every budget number and every failure mode below is taken from the
 
 ## 2. Design Philosophy — Seven Claims
 
-Helio's foliage system is accountable for seven specific claims, each measured against what UE5 actually does:
+Helio's foliage system is accountable for seven specific claims. Each is measured against what UE5 actually does:
 
 ```
  1.  Placement never touches the CPU
@@ -63,17 +63,17 @@ Helio's foliage system is accountable for seven specific claims, each measured a
 
 ### 2.1 Claim 1: Placement Never Touches the CPU
 
-Unreal Engine builds grass instance buffers on the CPU. `FGrassBuilder` runs async tasks fed by the landscape grass map, and it hitches when landscape components stream. The problem is not that the CPU is slow at placing grass — the problem is that placing grass on the CPU means every frame's worth of placement is bounded by CPU cycles that could be spent on gameplay logic.
+Unreal Engine builds grass instance buffers on the CPU. `FGrassBuilder` runs async tasks fed by the landscape grass map. It hitches when landscape components stream. The CPU is not slow at placing grass. Placing grass on the CPU means every frame's worth of placement is bounded by CPU cycles that could be spent on gameplay logic.
 
 Helio's placement is a compute shader over a residency-cached tile ring. The CPU cost is a constant-size uniform write per frame, independent of density.
 
 #### The tile ring
 
-The world is a grid of 8-metre tiles. A ring of tiles around the camera is resident. On camera motion, tiles entering the ring are pushed to a `place_queue`; tiles leaving are freed LRU. At most `max_tiles_per_frame` (default 24) are placed per frame, so churn is amortised and a teleport degrades to a few frames of progressive fill-in rather than a hitch.
+The world is a grid of 8-metre tiles. A ring of tiles around the camera is resident. On camera motion, tiles entering the ring are pushed to a `place_queue`. Tiles leaving are freed LRU. At most `max_tiles_per_frame` (default 24) are placed per frame. Churn is amortised. A teleport degrades to a few frames of progressive fill-in rather than a hitch.
 
 Placement for one tile: one workgroup per tile, each lane evaluating a stratified candidate (jittered grid, blue-noise offset from the seed hash) against the density weight, writing survivors into that tile's slab. Deterministic: same tile coordinate, same generation, same seed => byte-identical blade list, on any GPU. This is directly testable and is a CI test.
 
-**Why residency caching wins:** regenerating every visible blade every frame is the common GPU-grass shortcut and costs ~1 ms at 1 M blades. Caching makes the steady-state placement cost zero and the moving-camera cost proportional to ring perimeter, not ring area.
+**Why residency caching wins:** regenerating every visible blade every frame is the common GPU-grass shortcut. It costs ~1 ms at 1 M blades. Caching makes the steady-state placement cost zero. The moving-camera cost is proportional to ring perimeter, not ring area.
 
 #### The deterministic placement algorithm
 
@@ -83,9 +83,9 @@ Every placed blade is the output of a pure function:
 blade = f(tile_coord, lane_index, generation, seed)
 ```
 
-The function is evaluated identically in WGSL (on the GPU, in the placement dispatch) and in Rust (in the CPU reference test). `tile_coord` identifies which 8-metre tile the blade belongs to. `lane_index` is the blade's position within the tile's stratified candidate grid — each workgroup lane evaluates one candidate. `generation` is the tile's terrain and density version, bumped on every edit so that re-placing a tile produces a *different* deterministic set rather than the same one. `seed` is the layer's authored seed, letting two artists paint different random distributions over the same terrain.
+The function is evaluated identically in WGSL (on the GPU, in the placement dispatch) and in Rust (in the CPU reference test). `tile_coord` identifies the 8-metre tile the blade belongs to. `lane_index` is the blade's position within the tile's stratified candidate grid. Each workgroup lane evaluates one candidate. `generation` is the tile's terrain and density version, bumped on every edit so re-placing a tile produces a *different* deterministic set. `seed` is the layer's authored seed, letting two artists paint different random distributions over the same terrain.
 
-The candidate grid is a jittered stratified pattern: the tile is divided into N×N cells (N derived from density × tile area), each lane evaluates its cell's centre plus a blue-noise offset from `hash(seed, tile_coord, lane)`, then accepts or rejects based on:
+The candidate grid is a jittered stratified pattern. The tile is divided into N×N cells (N derived from density × tile area). Each lane evaluates its cell's centre plus a blue-noise offset from `hash(seed, tile_coord, lane)`, then accepts or rejects based on:
 
 1. Is the candidate inside at least one foliage layer's AABB?
 2. Does the terrain capture report a valid height at this XZ?
@@ -95,7 +95,7 @@ The candidate grid is a jittered stratified pattern: the tile is divided into N�
 
 ### 2.2 Claim 2: Foliage Is Occlusion-Culled
 
-UE5 grass is distance- and frustum-culled only. Helio runs the same conservative Hi-Z max-depth test the meshlet culler uses, at tile and 4×4-cluster granularity, so grass behind a wall costs nothing.
+UE5 grass is distance- and frustum-culled only. Helio runs the same conservative Hi-Z max-depth test the meshlet culler uses. It operates at tile and 4×4-cluster granularity. Grass behind a wall costs nothing.
 
 Two compute dispatches:
 
@@ -106,27 +106,27 @@ At 1 M blades this is 62,500 cluster lanes ≈ 977 workgroups. The budget is 0.1
 
 ### 2.3 Claim 3: Impostors Are First-Class and Lit
 
-Unreal Engine ships no built-in octahedral impostor baker — it is a plugin, and impostors commonly land in a forward or translucent path that misses deferred lighting.
+Unreal Engine ships no built-in octahedral impostor baker. It is a plugin. Impostors land in a forward or translucent path that misses deferred lighting.
 
-Helio's impostors are hemi-octahedral atlases baked by `helio-bake` and rasterised into the G-buffer with reconstructed normal and depth-parallax. They receive shadows, SSAO, SSR and GI identically to the mesh LODs.
+Helio's impostors are hemi-octahedral atlases baked by `helio-bake`. They are rasterised into the G-buffer with reconstructed normal and depth-parallax. They receive shadows, SSAO, SSR and GI identically to the mesh LODs.
 
-The atlas is stored as a **single `texture_2d_array`**, not a binding array, because `MAX_TEXTURES` is 16 on wasm32, Metal and Android. One binding, every platform, no per-platform shader rewrite. Three pages per impostor:
+The atlas is stored as a **single `texture_2d_array`**, not a binding array. `MAX_TEXTURES` is 16 on wasm32, Metal and Android. One binding, every platform, no per-platform shader rewrite. Three pages per impostor:
 
 - `Rgba8UnormSrgb`: base colour + coverage alpha
 - `Rg8Unorm`: octahedral-encoded world normal
 - `R8Unorm`: view-depth for parallax
 
-Transition from the deepest mesh LOD to the impostor uses a stochastic cross-fade over a band sized so the impostor's silhouette error is under one pixel at the switch distance.
+Transition from the deepest mesh LOD to the impostor uses a stochastic cross-fade. The band is sized so the impostor's silhouette error stays under one pixel at the switch distance.
 
 ### 2.4 Claim 4: WPO Does Not Break Culling
 
-This is the most subtle of the seven claims and the one where the plan's first draft was wrong.
+This is the most subtle of the seven claims. The plan's first draft was wrong.
 
-World-Position-Offset moves vertices — grass bends in the wind, leaves flutter. The problem: wind displaces geometry outside the object's bounding sphere and outside each meshlet's sphere. If the culler does not account for this displacement, the object gets culled while its displaced geometry is still on screen. Unreal Engine's answer is a global `WPO Disable Distance` and manually inflated bounds — a sledgehammer that either costs performance everywhere or pops geometry at the disable distance.
+World-Position-Offset moves vertices. Grass bends in the wind. Leaves flutter. Wind displaces geometry outside the object's bounding sphere and outside each meshlet's sphere. If the culler does not account for this displacement, the object gets culled while its displaced geometry is still on screen. Unreal Engine's answer is a global `WPO Disable Distance` and manually inflated bounds. It is a sledgehammer that either costs performance everywhere or pops geometry at the disable distance.
 
-Helio's answer is a per-type `wpo_extent` that dilates the object and meshlet cull radii, and a `wpo_disable_distance` that disables WPO **and** stops the dilation in the same frame, driven by the same distance constant. Bounds are never wrong in either direction.
+Helio's answer is a per-type `wpo_extent`. It dilates the object and meshlet cull radii. A `wpo_disable_distance` disables WPO **and** stops the dilation in the same frame, driven by the same distance constant. Bounds are never wrong in either direction.
 
-Getting the extent into the cull pass required a design revision. The plan's first draft tried to put `wpo_extent` into `GpuVgObject`, but that struct sums to exactly 128 bytes with zero padding, and the field named `reserved` is not spare — it is live per-frame GPU scratch written by `cs_select_objects` and read by `cs_cull_meshlets` as the object-visibility gate. Reusing it breaks VG culling outright.
+Getting the extent into the cull pass required a design revision. The plan's first draft tried to put `wpo_extent` into `GpuVgObject`. That struct sums to exactly 128 bytes with zero padding. The field named `reserved` is not spare. It is live per-frame GPU scratch written by `cs_select_objects` and read by `cs_cull_meshlets` as the object-visibility gate. Reusing it breaks VG culling outright.
 
 The correct home is `InstanceCullData`, which is `pub(crate)` to the VG pass:
 
@@ -141,13 +141,13 @@ With the extent available, the dilation is:
 - `cull_meshlet`: same dilation on the meshlet sphere
 - Past `wpo_disable_distance`, the vertex shader stops applying WPO **and** the culler stops dilating, in the same frame
 
-This is the failure UE papers over with a manual bounds scale. Getting it exactly right is a handful of lines and removes a whole class of edge-of-screen popping.
+This is the failure UE papers over with a manual bounds scale. Getting it exactly right is a handful of lines. It removes a whole class of edge-of-screen popping.
 
 ### 2.5 Claim 5: Wind-Correct Motion Vectors
 
 Grass in Unreal Engine writes no meaningful velocity. TAA smears it.
 
-Helio's foliage vertex shaders evaluate wind at both `t` and `t - dt` and emit a true `prev_clip_position`. This is what makes dithered LOD cross-fades resolve cleanly instead of ghosting.
+Helio's foliage vertex shaders evaluate wind at both `t` and `t - dt`. They emit a true `prev_clip_position`. This is what makes dithered LOD cross-fades resolve cleanly instead of ghosting.
 
 The wind uniform carries both timestamps:
 
@@ -161,11 +161,11 @@ pub struct GpuWind {
 }
 ```
 
-`prev_time` is not decoration. It is the input that lets every foliage vertex shader compute `prev_clip_position` correctly, which is the difference between clean TAA and the smeared grass UE ships with.
+`prev_time` is not decoration. It is the input that lets every foliage vertex shader compute `prev_clip_position` correctly. That is the difference between clean TAA and the smeared grass UE ships with.
 
 ### 2.6 Claim 6: Interaction Is a Shipped Feature, Not a Hack
 
-Physics-driven bend with exponential recovery, on a snapped camera-relative field, available to every foliage type.
+Physics-driven bend with exponential recovery. A snapped camera-relative field available to every foliage type.
 
 The interaction field is a camera-relative `Rgba16Float` texture (default 512² covering 64 m, snapped to the texel grid):
 
@@ -175,7 +175,7 @@ The interaction field is a camera-relative `Rgba16Float` texture (default 512² 
 
 ### 2.7 Claim 7: The Far Ring Has No Geometry and No Pop
 
-Past the last card LOD (L3, 45–120 m) we stop drawing geometry and hand the same density map to the terrain material as an albedo, roughness and normal perturbation. Unreal Engine pops grass out at the cull distance; we dissolve into terrain shading.
+Past the last card LOD (L3, 45–120 m) we stop drawing geometry. We hand the same density map to the terrain material as an albedo, roughness and normal perturbation. Unreal Engine pops grass out at the cull distance. We dissolve into terrain shading.
 
 The terrain material sees a density-weighted colour contribution at the exact density the placement shader would have placed blades.
 
@@ -189,15 +189,15 @@ The terrain material sees a density-weighted colour contribution at the exact de
 
 Seamless transitions are three mechanisms stacked:
 
-- **Scale-in**: a blade entering the ring interpolates height 0→1 over a 2 m band, so nothing ever appears at full size.
-- **Stochastic cross-fade**: over the LOD band both representations draw, each alpha-tested against `hash(seed) + blue_noise(pixel, frame)`. TAA resolves it — and resolves it correctly because of the wind-aware motion vectors.
-- **Card orientation continuity**: L2/L3 cards inherit the L1 blade's yaw so silhouette direction does not flip at the boundary.
+- **Scale-in**: a blade entering the ring interpolates height 0→1 over a 2 m band. Nothing ever appears at full size.
+- **Stochastic cross-fade**: over the LOD band both representations draw, each alpha-tested against `hash(seed) + blue_noise(pixel, frame)`. TAA resolves it correctly because of the wind-aware motion vectors.
+- **Card orientation continuity**: L2/L3 cards inherit the L1 blade's yaw. Silhouette direction does not flip at the boundary.
 
 ---
 
 ## 3. Where Helio Already Had the Hard Parts
 
-Helio did not start from zero. The engine already shipped the subsystems that most GPU-driven foliage renderers have to build from scratch. What was missing was the vegetation-specific wiring — placement, blade geometry, wind, impostors, interaction and the density and terrain authoring paths.
+Helio did not start from zero. The engine already shipped the subsystems most GPU-driven foliage renderers build from scratch. What was missing was the vegetation-specific wiring: placement, blade geometry, wind, impostors, interaction, and the density and terrain authoring paths.
 
 | Existing capability | What foliage needs from it |
 |---|---|
@@ -211,17 +211,17 @@ Helio did not start from zero. The engine already shipped the subsystems that mo
 | Whole-repo WGSL validation in CI | New shaders covered the moment they land |
 | Camera-relative scrolling sim + hitbox publication precedent | Exact data-flow template for the interaction field |
 
-The single biggest head start is the indirect draw infrastructure. Helio's `helio-pass-indirect-dispatch` already handles feature-detected `MULTI_DRAW_INDIRECT_COUNT` fallback, counter initialisation and the exact `DrawIndirectArgs` layout. Foliage needs exactly four `draw_indirect` calls — one per LOD — and no multi-draw anywhere in the grass path. That means it compiles on WebGPU, which has no `MULTI_DRAW_INDIRECT_COUNT`, without a single `#[cfg]` gate.
+The single biggest head start is the indirect draw infrastructure. Helio's `helio-pass-indirect-dispatch` already handles feature-detected `MULTI_DRAW_INDIRECT_COUNT` fallback, counter initialisation and the exact `DrawIndirectArgs` layout. Foliage needs exactly four `draw_indirect` calls (one per LOD) and no multi-draw anywhere in the grass path. It compiles on WebGPU, which has no `MULTI_DRAW_INDIRECT_COUNT`, without a single `#[cfg]` gate.
 
-The `BillboardPass` that existed before this work was not usable for vegetation. It composited into `pre_aa` *after* deferred lighting, which meant its output received no shadows, no SSAO, no GI and no correct TAA. Impostors must go through the G-buffer, which is what `FoliageGBufferPass` does — eight targets, identical format, `LoadOp::Load` so the executor fuses it into the existing G-buffer subpass chain.
+The `BillboardPass` that existed before this work was not usable for vegetation. It composited into `pre_aa` *after* deferred lighting. Its output received no shadows, no SSAO, no GI and no correct TAA. Impostors must go through the G-buffer. `FoliageGBufferPass` does this with eight targets, identical format, `LoadOp::Load` so the executor fuses it into the existing G-buffer subpass chain.
 
 ---
 
 ## 4. The GPU Data Model — 16 Bytes of Spite
 
-We have a budget: 24 MiB for the blade arena at Medium quality. Every blade record we write costs `arena_bytes / 16_byte_record` blades. At 16 bytes that is 1.5 M blades. Every extra byte costs 1.5 MiB of budget and a proportional slice of placement write bandwidth — which is the dominant GPU cost when the camera moves fast enough to refill the ring perimeter.
+We have a budget: 24 MiB for the blade arena at Medium quality. Every blade record costs `arena_bytes / 16_byte_record` blades. At 16 bytes that is 1.5 M blades. Every extra byte costs 1.5 MiB of budget and a proportional slice of placement write bandwidth. This is the dominant GPU cost when the camera moves fast enough to refill the ring perimeter.
 
-We therefore pack. Aggressively. And we live with the consequences.
+We pack. Aggressively. We live with the consequences.
 
 ### 4.1 GpuBladeInstance — 16 bytes
 
@@ -265,7 +265,7 @@ pub struct GpuBladeInstance {
 }
 ```
 
-The `BladeParams` unpacked type exists specifically so the CPU reference placement can work in human-scale values:
+The `BladeParams` unpacked type exists so the CPU reference placement can work in human-scale values:
 
 ```rust
 /// Unpacked, human-scale view of a GpuBladeInstance.
@@ -285,7 +285,7 @@ pub struct BladeParams {
 
 #### packed_pos: XZ as 16-bit unorm (not world space)
 
-This is the most important decision in the struct. Every blade stores its position as a fraction of the tile it lives in — not as metres in the world. That means the blade arena encodes *relative* positions that do not change when the tile moves in the residency ring.
+This is the most important decision in the struct. Every blade stores its position as a fraction of the tile it lives in, not as metres in the world. The blade arena encodes *relative* positions that do not change when the tile moves in the residency ring.
 
 The critical consequence: placement is a pure function.
 
@@ -296,13 +296,13 @@ blade = f(tile_coord, lane, generation)
                           frame index, time, camera position, or counter
 ```
 
-If we stored world-space positions, a blade's encoding would depend on where its tile sits in the world. Replace the same tile at the same coordinate with the same generation and you must get byte-identical output — that is the determinism contract. Tile-local positions make that true trivially; world-space positions would require reconstructing the same floating-point multiplication that produced the original coordinate, which is not reproducible across GPUs with different FMA behaviour.
+World-space positions would make a blade's encoding depend on where its tile sits in the world. Replace the same tile at the same coordinate with the same generation and you must get byte-identical output. That is the determinism contract. Tile-local positions make that true trivially. World-space positions would require reconstructing the same floating-point multiplication that produced the original coordinate. That is not reproducible across GPUs with different FMA behaviour.
 
 #### packed_height_yaw: f16 offset + 16-bit turn
 
-Height offset is relative to the tile's `bounds_center_y`, not absolute world Y. This is what makes f16 safe: f16 has ~3 decimal digits of precision, which is centimetre resolution at 100 m and useless at 10 km. Tile-relative keeps the offset small — typically within ±5 m of the tile centre — so the f16 mantissa covers it with sub-centimetre precision.
+Height offset is relative to the tile's `bounds_center_y`, not absolute world Y. This is what makes f16 safe. f16 has ~3 decimal digits of precision. That is centimetre resolution at 100 m and useless at 10 km. Tile-relative keeps the offset small, typically within ±5 m of the tile centre. The f16 mantissa covers it with sub-centimetre precision.
 
-Yaw uses the turn convention (divide by 2^16, not 2^16 - 1) because an angle wraps: 0 and 2π are the same orientation. Spending a code on both wastes a step.
+Yaw uses the turn convention (divide by 2^16, not 2^16 - 1). An angle wraps: 0 and 2π are the same orientation. Spending a code on both wastes a step.
 
 ```rust
 pub fn pack_yaw(radians: f32) -> u16 {
@@ -314,19 +314,19 @@ pub fn pack_yaw(radians: f32) -> u16 {
 
 #### packed_scale_type: four u8s in one u32
 
-Height scale, width scale, type id, variant — each gets a byte. The scales are unorm lerp factors into the type's height/width ranges, not metres. This is deliberate: a designer retuning a foliage type's size does not invalidate resident tiles. Only the descriptor changes and the arena stays valid.
+Height scale, width scale, type id, variant. Each gets a byte. The scales are unorm lerp factors into the type's height/width ranges, not metres. This is deliberate: a designer retuning a foliage type's size does not invalidate resident tiles. Only the descriptor changes. The arena stays valid.
 
-Type id being 8 bits caps a scene at 256 distinct foliage types. That ceiling is deliberate: the descriptor array is read by every blade lane, and 256 × 96 B = 24 KiB, which fits comfortably in L1 on every tier.
+Type id being 8 bits caps a scene at 256 distinct foliage types. That ceiling is deliberate. The descriptor array is read by every blade lane. 256 × 96 B = 24 KiB, which fits comfortably in L1 on every tier.
 
 #### packed_tint_seed: the load-bearing field
 
-The seed is the low 16 bits of `blade_seed` and is the single most important value in this struct. Dithered LOD cross-fades, wind phase offset, per-blade variation — everything keys off it. It must be derived from `(tile_coord, lane, generation)` and **never** from frame state.
+The seed is the low 16 bits of `blade_seed`. It is the single most important value in this struct. Dithered LOD cross-fades, wind phase offset, per-blade variation. Everything keys off it. It must be derived from `(tile_coord, lane, generation)` and **never** from frame state.
 
-Read that again: never from frame state. A seed that changes between frames turns the stochastic cross-fade into full-screen static that TAA cannot resolve, and makes every blade's wind phase jump every frame.
+Read that again: never from frame state. A seed that changes between frames turns the stochastic cross-fade into full-screen static that TAA cannot resolve. It makes every blade's wind phase jump every frame.
 
 ### 4.2 Tile-local positions and GPU reproducibility
 
-We have said this already, but it bears repeating because it is the single most consequential decision in the system:
+We have said this already. It bears repeating. This is the single most consequential decision in the system.
 
 ```
   ┌─────────────────────────────────────────┐
@@ -337,7 +337,7 @@ We have said this already, but it bears repeating because it is the single most 
   └─────────────────────────────────────────┘
 ```
 
-The WGSL placement shader evaluates exactly the same hash and unorm quantisation that the CPU reference does. Because neither path ever touches world coordinates in the packing inner loop, they can disagree on world-space floating-point rounding without affecting the blade arena contents.
+The WGSL placement shader evaluates the same hash and unorm quantisation the CPU reference does. Neither path ever touches world coordinates in the packing inner loop. They can disagree on world-space floating-point rounding without affecting the blade arena contents.
 
 This is what makes the determinism test meaningful:
 
@@ -418,7 +418,7 @@ pub enum TileState {
 }
 ```
 
-Every state round-trips through its `u32` representation, and unknown values are refused rather than defaulted:
+Every state round-trips through its `u32` representation. Unknown values are refused rather than defaulted:
 
 ```rust
 #[test]
@@ -432,11 +432,11 @@ fn tile_state_round_trips_and_refuses_to_guess() {
 }
 ```
 
-The `generation` field is bumped whenever the density map or terrain under this tile is edited. Residency is keyed on `(tile_coord, generation)`, so a bump invalidates the cached blades without needing an explicit flush, and it feeds `blade_seed` so the re-placed blades are a *different* deterministic set rather than the same one.
+The `generation` field is bumped whenever the density map or terrain under this tile is edited. Residency is keyed on `(tile_coord, generation)`. A bump invalidates the cached blades without an explicit flush. It feeds `blade_seed` so the re-placed blades are a *different* deterministic set.
 
 ### 4.4 GpuFoliageType — 96 bytes (the plan said 64)
 
-This is the one that embarrassed us in code review. The plan's §4.3 heads this struct "64 bytes", but its own field list sums to 84. The header was simply wrong, and the fields are what matter. Rounding up to 96 leaves 12 bytes of tail padding, which is deliberate and meant to be spent.
+This one embarrassed us in code review. The plan's §4.3 heads this struct "64 bytes". Its own field list sums to 84. The header was wrong. The fields are what matter. Rounding up to 96 leaves 12 bytes of tail padding. This is deliberate and meant to be spent.
 
 ```rust
 /// Foliage type descriptor shared by placement and rasterisation. Exactly 96 bytes.
@@ -478,9 +478,9 @@ pub struct GpuFoliageType {
 }
 ```
 
-The earlier draft of this type hit 64 bytes by storing `height_range`, `width_range`, `slope_range` and `lod_distances` as `f16` pairs. That bought about two kilobytes — nothing — and cost a decode on both sides, a standing risk that the WGSL `unpack2x16float` path and the Rust packer disagree at some edge value, and a struct with no room to grow.
+The earlier draft of this type hit 64 bytes by storing `height_range`, `width_range`, `slope_range` and `lod_distances` as `f16` pairs. That bought about two kilobytes. It cost a decode on both sides, a standing risk that the WGSL `unpack2x16float` path and the Rust packer disagree at some edge value, and a struct with no room to grow.
 
-Packing is the wrong trade for a per-type table. It is the right trade for `GpuBladeInstance`, which is per-instance and multiplied by a million. For the type descriptor table — tens of entries, permanently hot in L1 — the savings are theoretical and the costs are real.
+Packing is the wrong trade for a per-type table. It is the right trade for `GpuBladeInstance`, multiplied by a million. For the type descriptor table, tens of entries permanently hot in L1, the savings are theoretical and the costs are real.
 
 #### The WGSL `vec3<f32>` footgun
 
@@ -502,9 +502,9 @@ Every field in `GpuFoliageType` must be declared as a scalar in WGSL. Not one ma
 84..96  _pad:                  u32×3
 ```
 
-`wind_response` is the dangerous one. Someone will reach for `vec3<f32>` without thinking — it is three floats, after all. WGSL gives `vec3<f32>` a 16-byte alignment, so that single declaration would push the field from offset 52 to 64 and shift **every field after it**.
+`wind_response` is the dangerous one. Someone will reach for `vec3<f32>` without thinking. It is three floats, after all. WGSL gives `vec3<f32>` a 16-byte alignment. That single declaration would push the field from offset 52 to 64. It would shift **every field after it**.
 
-Nothing crashes. Trees render with a random material. Foliage kinds resolve to the wrong pipeline. The cause is twelve bytes of padding rules in a language spec, and it costs a day to bisect.
+Nothing crashes. Trees render with a random material. Foliage kinds resolve to the wrong pipeline. The cause is twelve bytes of padding rules in a language spec. It costs a day to bisect.
 
 We pin this with a test:
 
@@ -554,7 +554,7 @@ pub struct GpuFoliageLayer {
 }
 ```
 
-Two `vec4<f32>`, chosen deliberately because WGSL gives `vec4` 16-byte alignment, so any field added after these would start on its own 16-byte cell.
+Two `vec4<f32>`, chosen deliberately. WGSL gives `vec4` 16-byte alignment. Any field added after these would start on its own 16-byte cell.
 
 ### 4.6 FoliageKind and the flag bits
 
@@ -590,7 +590,7 @@ const _: () = {
 };
 ```
 
-These fail at compile time if the size changes — no runtime test suite needed. A size change that the shader does not follow does not fail loudly; the shader reads every field from the wrong offset and produces garbage rotations, which is a full day of debugging.
+These fail at compile time if the size changes. No runtime test suite needed. A size change the shader does not follow does not fail loudly. The shader reads every field from the wrong offset and produces garbage rotations. That is a full day of debugging.
 
 We also pin field offsets:
 
@@ -620,7 +620,7 @@ fn foliage_type_field_offsets_match_the_documented_layout() {
 
 ### 4.8 The seed: never from frame state
 
-The `blade_seed` function is the linchpin of the entire determinism contract:
+The `blade_seed` function is the linchpin of the determinism contract:
 
 ```rust
 pub const fn blade_seed(tile_coord: [i32; 2], lane: u32, generation: u32) -> u32 {
@@ -636,7 +636,7 @@ pub const fn blade_seed(tile_coord: [i32; 2], lane: u32, generation: u32) -> u32
 }
 ```
 
-Three inputs. That is it. No frame index. No time. No counter. Nothing that changes between frames.
+Three inputs. No frame index. No time. No counter. Nothing changes between frames.
 
 ### 4.9 Packing/unpacking functions and round-trips
 
@@ -712,7 +712,7 @@ fn blade_repack_is_idempotent_after_the_first_pass() {
 }
 ```
 
-`unpack_blade(pack_blade(p))` is not bit-identical to `p` on the first pass — positions and tints quantise to unorm, height to f16, yaw to 1/65536 of a turn. But from the second application onward it *is* idempotent. That is the property the round-trip tests assert: a decode/encode cycle that drifted would let a tile that survives an evict and re-place look different from one that did not.
+`unpack_blade(pack_blade(p))` is not bit-identical to `p` on the first pass. Positions and tints quantise to unorm, height to f16, yaw to 1/65536 of a turn. From the second application onward it *is* idempotent. That is the property the round-trip tests assert. A decode/encode cycle that drifted would let a tile that survives an evict and re-place look different from one that did not.
 
 ---
 
@@ -760,11 +760,11 @@ pub struct TileRing {
 
 ### 5.1 Why Caching: O(perimeter) Not O(area)
 
-The obvious "simpler" implementation — rebuild the resident set from scratch each frame and diff it — renders identically and is **O(area)** of the ring. A 128 m ring is `(128 / 8)² = 256` tiles; rebuilding it from scratch visits all 256 coordinates per frame.
+The simpler implementation rebuilds the resident set from scratch each frame and diffs it. It renders identically and is **O(area)** of the ring. A 128 m ring is `(128 / 8)² = 256` tiles. Rebuilding from scratch visits all 256 coordinates per frame.
 
-Our `shift_to` method visits **only the entering and leaving strips**. The cost is proportional to the **perimeter** of the ring: `4 × tiles_across` for a full-one-tile step, rather than `tiles_across²`.
+Our `shift_to` method visits **only the entering and leaving strips**. The cost is proportional to the **perimeter** of the ring: `4 × tiles_across` for a full-one-tile step, not `tiles_across²`.
 
-The one case that is genuinely O(area) is a **teleport**, where the new window does not overlap the old at all. That is unavoidable, and it is why placement is budgeted: the entering tiles queue up and drain at `max_tiles_per_frame`, so a teleport degrades to a few frames of progressive fill-in rather than a hitch.
+The one case that is genuinely O(area) is a **teleport** where the new window does not overlap the old at all. That is unavoidable. It is why placement is budgeted. The entering tiles queue up and drain at `max_tiles_per_frame`. A teleport degrades to a few frames of progressive fill-in rather than a hitch.
 
 ### 5.2 `shift_to` — The Two-Loop Perimeter Algorithm
 
@@ -870,7 +870,7 @@ pub struct RingUpdate {
 | `pending` | Tile coordinates still waiting for a placement budget slot |
 | `invalidated` | The content generation changed and the whole ring was invalidated |
 
-In steady state (camera within the same tile), `update` returns `RingUpdate::default()` — all fields zero, no work done. The steady state is **free**.
+In steady state (camera within the same tile), `update` returns `RingUpdate::default()`. All fields zero, no work done. The steady state is **free**.
 
 ### 5.4 The LRU eviction path
 
@@ -898,7 +898,7 @@ None => {
 
 ### 5.5 Max 24 Tiles/Frame — Amortised Placement
 
-The placement budget (`DEFAULT_MAX_TILES_PER_FRAME = 24`) caps the work per frame so that no single frame spikes. A teleport — camera jumps from `[0, 0]` to `[10000, 10000]` tiles away — releases all 1089 tiles and places at most 24 per frame:
+The placement budget (`DEFAULT_MAX_TILES_PER_FRAME = 24`) caps the work per frame so no single frame spikes. A teleport jumps the camera from `[0, 0]` to `[10000, 10000]` tiles away. It releases all 1089 tiles and places at most 24 per frame:
 
 ```rust
 #[test]
@@ -925,15 +925,15 @@ fn a_teleport_degrades_to_progressive_fill_in_not_a_hitch() {
 
 ### 5.6 Fixed Slabs Per Tile
 
-This is the most consequential correctness choice in the buffer layout. The blade arena is **partitioned into equal fixed slabs**, one per ring slot. A bump allocator would be simpler in one sense — just push survivors — but would introduce a fragility:
+This is the most consequential correctness choice in the buffer layout. The blade arena is **partitioned into equal fixed slabs**, one per ring slot. A bump allocator would be simpler in one sense (just push survivors) but would introduce a fragility:
 
-> With a bump allocator a tile's `blade_offset` would depend on the order tiles happened to be placed in, so an evict/re-place cycle would move a tile's blades in memory and the arena would fragment under ring churn. Equal slabs also make `blade_index / blades_per_tile` an exact O(1) recovery of the owning tile.
+> With a bump allocator a tile's `blade_offset` would depend on the order tiles happened to be placed in. An evict/re-place cycle would move a tile's blades in memory and the arena would fragment under ring churn. Equal slabs also make `blade_index / blades_per_tile` an exact O(1) recovery of the owning tile.
 
-The slab capacity is a constructor parameter, and density is expressed relative to it. If the authored density exceeds the slab, the candidate grid is scaled down uniformly — every blade gets thinner, rather than one corner of every tile going bald.
+The slab capacity is a constructor parameter. Density is expressed relative to it. If the authored density exceeds the slab, the candidate grid is scaled down uniformly. Every blade gets thinner, rather than one corner of every tile going bald.
 
 ### 5.7 Generation Bump for Density/Terrain Edits
 
-Residency is keyed on `(tile_coord, generation)`. When the content generation changes, the ring is invalidated and requeued. The generation travels from `FrameResources.foliage.generation` through `TileRing::update` into `blade_seed`, so a re-placed tile gets a **different** deterministic set.
+Residency is keyed on `(tile_coord, generation)`. When the content generation changes, the ring is invalidated and requeued. The generation travels from `FrameResources.foliage.generation` through `TileRing::update` into `blade_seed`. A re-placed tile gets a **different** deterministic set.
 
 ```rust
 pub fn update(&mut self, camera_xz: [f32; 2], generation: u32) -> RingUpdate {
@@ -946,7 +946,7 @@ pub fn update(&mut self, camera_xz: [f32; 2], generation: u32) -> RingUpdate {
 }
 ```
 
-Every freed slot must appear in the `dirty` list in the **same** frame, or the GPU keeps drawing tiles whose blades belong to the previous generation:
+Every freed slot must appear in the `dirty` list in the **same** frame. Otherwise the GPU keeps drawing tiles whose blades belong to the previous generation:
 
 ```rust
 #[test]
@@ -967,7 +967,7 @@ fn a_generation_bump_invalidates_residency_and_requeues_the_window() {
 
 #### The `TileState` machine and why headers publish `Placing` not `Resident`
 
-When the CPU uploads a new tile header in `upload_tile_headers`, it publishes state `Placing`, not `Resident`. The GPU flips the state to `Resident` at the end of `cs_place`. If the CPU published `Resident` instead, the cull pass could read a slab that placement has not written yet, drawing the previous tenant's blades for one frame.
+When the CPU uploads a new tile header in `upload_tile_headers`, it publishes state `Placing`, not `Resident`. The GPU flips the state to `Resident` at the end of `cs_place`. If the CPU published `Resident`, the cull pass could read a slab that placement has not written yet. It would draw the previous tenant's blades for one frame.
 
 ---
 
@@ -975,7 +975,7 @@ When the CPU uploads a new tile header in `upload_tile_headers`, it publishes st
 
 ### 6.1 Four Compute Stages
 
-The execute method in `pass.rs` records four compute passes in sequence on `ctx.encoder_ptr` (the main render encoder — not `chain_transparent`, because all `chain_transparent` work runs before *all* render-encoder work and would therefore read the previous frame's Hi-Z):
+The execute method in `pass.rs` records four compute passes in sequence on `ctx.encoder_ptr` (the main render encoder, not `chain_transparent`). All `chain_transparent` work runs before *all* render-encoder work. It would read the previous frame's Hi-Z:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -1031,7 +1031,7 @@ if self.queued_tile_count > 0 {
 
 ### 6.2 Deterministic Placement: Prefix Sum (Not `atomicAdd`)
 
-The plan's §6.1 requires that the same `(tile_coord, generation)` produce a **byte-identical** blade list on any GPU. That is stronger than "the same set of blades survives", and it is the reason the shader compacts with a **workgroup prefix sum** instead of `atomicAdd`: atomic ordering is unspecified, so an atomic append produces the right *set* in an arbitrary *order*, and the arena bytes would differ between two runs on the same machine. With the scan, a blade's slab index is a pure function of its candidate index.
+The plan's §6.1 requires the same `(tile_coord, generation)` to produce a **byte-identical** blade list on any GPU. That is stronger than "the same set of blades survives". It is the reason the shader compacts with a **workgroup prefix sum** instead of `atomicAdd`. Atomic ordering is unspecified. An atomic append produces the right *set* in an arbitrary *order*. The arena bytes would differ between two runs on the same machine. With the scan, a blade's slab index is a pure function of its candidate index.
 
 The determinism test in `reference.rs`:
 
@@ -1147,15 +1147,15 @@ fn stratification_spreads_blades_over_the_whole_tile() {
 
 ### 6.4 Cluster Culling at 4×4 Granularity
 
-After placement, the tile cull pass decides which *tiles* are visible (frustum + Hi-Z max-depth test against the tile AABB dilated by `max_height + wpo_extent`). Then the **cluster cull** pass refines this to 4×4 blade clusters — 16 blades grouped into one visibility unit and one LOD classification unit.
+After placement, the tile cull pass decides which *tiles* are visible (frustum + Hi-Z max-depth test against the tile AABB dilated by `max_height + wpo_extent`). The **cluster cull** pass then refines this to 4×4 blade clusters. Sixteen blades are grouped into one visibility unit and one LOD classification unit.
 
 Each cluster lane:
 
 1. **Frustum test** against the cluster's bounding sphere (expanded by blade height).
 2. **Hi-Z max-depth test** — same conservative test `vg_cull.wgsl` uses, including the `hiz_valid` frame-0 guard.
-3. **LOD classification** — distance from camera selects L0, L1, L2 or L3; within the LOD transition band, both representations draw and a stochastic cross-fade selects.
+3. **LOD classification** — distance from camera selects L0, L1, L2 or L3. Within the LOD transition band, both representations draw and a stochastic cross-fade selects.
 
-Survivors are appended via `atomicAdd` into four per-LOD `visible_blades` buffers (this is the one place in the entire pipeline where atomic appends are acceptable, because the output is a *bag of indices* used only for drawing — ordering does not affect correctness or reproducibility).
+Survivors are appended via `atomicAdd` into four per-LOD `visible_blades` buffers. This is the one place in the pipeline where atomic appends are acceptable. The output is a *bag of indices* used only for drawing. Ordering does not affect correctness or reproducibility.
 
 ### 6.5 LOD Ladder Table
 
@@ -1171,11 +1171,11 @@ Each LOD is one `draw_indirect(vertex_count, instance_count)` — four draws tot
 
 ### 6.6 Three Anti-Pop Mechanisms
 
-**Scale-in:** a blade entering the ring at its outer edge interpolates height 0→1 over a 2 m band, so nothing ever appears at full size on its first frame.
+**Scale-in:** a blade entering the ring at its outer edge interpolates height 0→1 over a 2 m band. Nothing appears at full size on its first frame.
 
-**Stochastic cross-fade:** over the LOD band both representations draw. Each blade is alpha-tested against `hash(seed) + blue_noise(pixel, frame)`, so the transition is a random subset of blades switching per frame. TAA resolves it — and resolves it correctly because of the wind-aware motion vectors.
+**Stochastic cross-fade:** over the LOD band both representations draw. Each blade is alpha-tested against `hash(seed) + blue_noise(pixel, frame)`. The transition is a random subset of blades switching per frame. TAA resolves it correctly because of the wind-aware motion vectors.
 
-**Card orientation continuity:** L2 and L3 cards inherit the L1 blade's yaw. Without this, the silhouette direction would flip at the boundary. The yaw is derived from the same seed hash at every LOD, so the value is continuous by construction.
+**Card orientation continuity:** L2 and L3 cards inherit the L1 blade's yaw. Without this, the silhouette direction would flip at the boundary. The yaw is derived from the same seed hash at every LOD. The value is continuous by construction.
 
 ### 6.7 Overflow Handling and Counter Readback
 
@@ -1254,11 +1254,11 @@ pub fn place_tile_reference(
 
 ## 7. Wind System and Motion Vectors
 
-> "If the wind model produces a visible seam between the blade geometry and the impostor card of the same plant, the stochastic cross-fade cannot hide it — because the cross-fade was designed to hide a *coverage* discontinuity, not a *position* discontinuity. The wind must be phase-locked across every path that draws that plant."
+> "If the wind model produces a visible seam between the blade geometry and the impostor card of the same plant, the stochastic cross-fade cannot hide it. The cross-fade was designed to hide a *coverage* discontinuity, not a *position* discontinuity. The wind must be phase-locked across every path that draws that plant."
 
-Helio's wind model is the thing we are proudest of in the foliage stack. It is a three-band displacement model — trunk sway, branch flutter, leaf jitter — implemented once in a shared WGSL prelude, included by every shader that displaces a vertex. Grass blades, tree world-position-offset and impostor cards draw the *same plant* at different distances, and two of those are on screen simultaneously inside every LOD cross-fade band. If they each grew their own `sin(time)` the silhouettes would shear apart across the fade.
+Helio's wind model is the thing we are proudest of in the foliage stack. It is a three-band displacement model: trunk sway, branch flutter, leaf jitter. It is implemented once in a shared WGSL prelude, included by every shader that displaces a vertex. Grass blades, tree world-position-offset and impostor cards draw the *same plant* at different distances. Two of those are on screen simultaneously inside every LOD cross-fade band. If they each grew their own `sin(time)` the silhouettes would shear apart across the fade.
 
-So: one implementation, shared everywhere, in phase by construction.
+One implementation, shared everywhere, in phase by construction.
 
 ### 7.1 The GpuWind uniform (48 bytes)
 
@@ -1287,11 +1287,11 @@ struct Wind {
 }
 ```
 
-The two must be edited together. A mismatch does not produce a shader error — it reinterprets the gust parameters as a direction and produces vegetation that either stands perfectly still or flies apart.
+The two must be edited together. A mismatch does not produce a shader error. It reinterprets the gust parameters as a direction. Vegetation either stands perfectly still or flies apart.
 
 ### 7.2 Why `prev_time` exists
 
-The `time_prev_time.y` field is the most load-bearing single f32 in the foliage system. It exists for exactly one reason: motion vectors.
+The `time_prev_time.y` field is the most load-bearing single f32 in the foliage system. It exists for one reason: motion vectors.
 
 Every foliage vertex shader evaluates the entire wind model **twice** per vertex:
 
@@ -1319,7 +1319,7 @@ fn foliage_velocity(clip_position: vec2<f32>, prev_clip: vec4<f32>) -> vec2<f32>
 }
 ```
 
-**What breaks without `prev_time`:** fold `time` into the wind functions and there is no way to ask for `t - dt`. Every foliage vertex reports zero motion. TAA reprojects a moving blade onto the history texel of whatever was behind it — every blade of grass in the frame smears. It also silently breaks the dithered LOD cross-fades, which resolve only when the motion vectors underneath them are right. This is the artefact Unreal Engine grass ships with, and it is the single thing we point to when someone asks why the foliage stack is worth building.
+**What breaks without `prev_time`:** fold `time` into the wind functions and there is no way to ask for `t - dt`. Every foliage vertex reports zero motion. TAA reprojects a moving blade onto the history texel of whatever was behind it. Every blade of grass in the frame smears. It silently breaks the dithered LOD cross-fades, which resolve only when the motion vectors underneath them are right. This is the artefact Unreal Engine grass ships with. It is the single thing we point to when someone asks why the foliage stack is worth building.
 
 On the Rust side, `Wind::advance` rolls the clock:
 
@@ -1333,9 +1333,9 @@ impl Wind {
 }
 ```
 
-Call it exactly once per simulated frame. Twice halves the apparent velocity; not at all makes `t == prev_time`, which reports zero motion just as badly as omitting the field.
+Call it exactly once per simulated frame. Twice halves the apparent velocity. Not at all makes `t == prev_time`, which reports zero motion just as badly as omitting the field.
 
-The `Wind` struct that owns the clock — stored in `Scene` — is the *only* wind clock in the renderer. Passes are not allowed to keep their own accumulated time, because two clocks drift and drifting clocks put the blade geometry and the impostor cards out of phase at the cross-fade band.
+The `Wind` struct that owns the clock (stored in `Scene`) is the *only* wind clock in the renderer. Passes are not allowed to keep their own accumulated time. Two clocks drift. Drifting clocks put the blade geometry and the impostor cards out of phase at the cross-fade band.
 
 ```rust
 impl Default for Wind {
@@ -1356,10 +1356,10 @@ impl Default for Wind {
 
 ### 7.3 Wind coherence — instance origin, not per-vertex
 
-The sway band samples its phase from a world-space noise at the *instance origin* — the plant's root — and not at the shaded vertex. That distinction is the entire reason `helio_wind_sway` takes an origin rather than a position:
+The sway band samples its phase from a world-space noise at the *instance origin* (the plant's root), not at the shaded vertex. That distinction is the entire reason `helio_wind_sway` takes an origin rather than a position:
 
-- Sampled at the origin, every vertex of one plant shares a phase (the plant moves as one object) and neighbouring plants, being close in world space, share *nearly* the same phase, so a meadow leans in coherent waves.
-- Sampled per vertex, each vertex — and each plant — gets an independent phase. That is what makes procedural wind read as "boiling": a field of vegetation with no correlation length, shimmering rather than blowing.
+- Sampled at the origin, every vertex of one plant shares a phase (the plant moves as one object). Neighbouring plants, being close in world space, share *nearly* the same phase. A meadow leans in coherent waves.
+- Sampled per vertex, each vertex and each plant gets an independent phase. That is what makes procedural wind read as "boiling": a field of vegetation with no correlation length, shimmering rather than blowing.
 
 The coherence constant is `HELIO_WIND_SWAY_COHERENCE = 0.06` (1/m). At that value the sway phase decorrelates over roughly 16 metres.
 
@@ -1383,7 +1383,7 @@ fn helio_wind_hash_unorm(x: u32) -> f32 {
 }
 ```
 
-The sine trick (`fract(sin(x) * 43758.5453)`) is the usual shader-hash shortcut and it is wrong for this use: `sin` is only guaranteed to a few ULP and vendors disagree on large arguments, so the same blade hashes differently on two GPUs. Wind phase must be bit-stable, because the cross-fade blends two representations of one plant and any phase difference between them shows up as a shearing silhouette.
+The sine trick (`fract(sin(x) * 43758.5453)`) is the usual shader-hash shortcut. It is wrong for this use. `sin` is only guaranteed to a few ULP and vendors disagree on large arguments. The same blade hashes differently on two GPUs. Wind phase must be bit-stable. The cross-fade blends two representations of one plant. Any phase difference between them shows up as a shearing silhouette.
 
 ### 7.5 Gust envelope advected downwind
 
@@ -1408,7 +1408,7 @@ fn helio_wind_gust(wind: Wind, world_pos: vec3<f32>, time: f32) -> f32 {
 }
 ```
 
-The advection (`HELIO_WIND_GUST_ADVECTION = 0.35`) is the point of the whole function. A stationary turbulence field makes every plant in a blotch pulse together forever. An advected field produces a gust front that visibly travels across the field.
+The advection (`HELIO_WIND_GUST_ADVECTION = 0.35`) is the point of the whole function. A stationary turbulence field makes every plant in a blotch pulse together forever. An advected field produces a gust front that travels across the field.
 
 ### 7.6 Band 1 — trunk / stem sway
 
@@ -1447,10 +1447,10 @@ fn helio_wind_sway(
 
 Key details:
 
-- **2.17 is deliberately not 2.0.** An exact harmonic makes the motion strictly periodic at the fundamental, and the eye picks a one-second loop out of a field instantly.
+- **2.17 is deliberately not 2.0.** An exact harmonic makes the motion strictly periodic at the fundamental. The eye picks a one-second loop out of a field instantly.
 - **Lateral sway is 35% of downwind.** A stem that only moves in the wind plane reads as a hinge, not a plant.
 - **Amplitude scales with height squared**, the first mode shape of a cantilever beam.
-- **Side axis falls back to +X when wind points straight up.** `cross` degenerates there and normalising it would put a NaN into the vertex position.
+- **Side axis falls back to +X when wind points straight up.** `cross` degenerates there. Normalising it would put a NaN into the vertex position.
 
 Base frequency: 0.26 Hz. Amplitude: 0.030 m per m/s of wind speed.
 
@@ -1571,11 +1571,11 @@ Wind response is authored per foliage type as a three-element `[trunk, branch, l
 
 ### 7.12 Generation counter — why wind must not advance it
 
-This is a subtle but load-bearing invariant:
+This is a load-bearing invariant:
 
 > **The `generation` counter must not advance when the wind changes.**
 
-`generation` gates re-upload of the foliage type table to the GPU. Wind changes every single frame. If it bumped `generation`, the type table would re-upload every frame and the residency cache's whole reason for existing — that steady-state foliage costs the CPU nothing — would be gone.
+`generation` gates re-upload of the foliage type table to the GPU. Wind changes every single frame. If it bumped `generation`, the type table would re-upload every frame. The residency cache's whole reason for existing (steady-state foliage costs the CPU nothing) would be gone.
 
 ```rust
 fn rebuild_foliage_buffers(&mut self) {
@@ -1606,7 +1606,7 @@ pub fn set_wind(&mut self, wind: Wind) {
 
 ### 7.13 The shared prelude — why one implementation
 
-The decision to implement wind once in `foliage_wind.wgsl` and include it everywhere was not an optimisation; it was a correctness requirement. Grass blades, tree world-position-offset, and impostor cards are three different rasterisation paths that draw the *same plant* at different distances. Two of them are on screen simultaneously inside every LOD cross-fade band. If those paths each grew their own `sin(time)` the silhouettes would shear against each other across the fade.
+The decision to implement wind once in `foliage_wind.wgsl` and include it everywhere was not an optimisation. It was a correctness requirement. Grass blades, tree world-position-offset, and impostor cards are three different rasterisation paths that draw the *same plant* at different distances. Two of them are on screen simultaneously inside every LOD cross-fade band. If those paths each grew their own `sin(time)` the silhouettes would shear against each other across the fade.
 
 The inclusion mechanism is the existing `shader::resolve` prelude system. Shaders opt in:
 
@@ -1622,29 +1622,29 @@ The prelude declares no bindings and samples no textures. The including shader d
 
 ### 7.14 What we learned
 
-The wind model went through seven distinct iterations before it stopped looking wrong. Each one taught us something about what the eye actually reads as wind rather than as an animation:
+The wind model went through seven distinct iterations before it stopped looking wrong. Each one taught us something about what the eye reads as wind rather than as an animation.
 
-**Boiling vs. blowing (iteration 1):** First pass used per-vertex noise driving all three bands. Every blade shimmered independently; it looked like a heat haze, not wind. The fix was moving the sway phase to the instance origin — understanding that phase coherence is the single biggest perceptual lever in procedural wind.
+**Boiling vs. blowing (iteration 1):** First pass used per-vertex noise driving all three bands. Every blade shimmered independently. It looked like a heat haze, not wind. The fix was moving the sway phase to the instance origin. Phase coherence is the single biggest perceptual lever in procedural wind.
 
-**Frequency ramp (iteration 2):** Amplitude scaled with speed, frequencies were fixed. Strong wind made everything swing further but not faster. The fix was `helio_wind_tempo` — a linear ramp from 0.35 to 1.65 applied to all three bands.
+**Frequency ramp (iteration 2):** Amplitude scaled with speed, frequencies were fixed. Strong wind made everything swing further but not faster. The fix was `helio_wind_tempo`: a linear ramp from 0.35 to 1.65 applied to all three bands.
 
-**Gust advection (iteration 3):** The turbulence field pulsed in place. Every blade in a blotch leaned together forever. The fix was `HELIO_WIND_GUST_ADVECTION = 0.35` — advecting the noise sample downwind.
+**Gust advection (iteration 3):** The turbulence field pulsed in place. Every blade in a blotch leaned together forever. The fix was `HELIO_WIND_GUST_ADVECTION = 0.35`: advecting the noise sample downwind.
 
-**Incommensurate second mode (iteration 4):** The sway band uses `sin(t) * 0.75 + sin(t * 2.17 + 1.3) * 0.25`. The 2.17 is deliberately not an integer: an exact harmonic makes the motion strictly periodic, and the eye picks a one-second loop instantly.
+**Incommensurate second mode (iteration 4):** The sway band uses `sin(t) * 0.75 + sin(t * 2.17 + 1.3) * 0.25`. The 2.17 is deliberately not an integer. An exact harmonic makes the motion strictly periodic. The eye picks a one-second loop instantly.
 
 **Lateral sway (iteration 4b):** Early versions only displaced along the wind direction. A stem that only moves in the wind plane reads as a hinge, not a plant.
 
-**Motion vectors and `prev_time` (iteration 5):** The motion vector fix was an architectural change to how the model is called. Every vertex shader evaluates the model twice, at two different times, and the model functions must accept `time` as a parameter rather than reading it from the uniform.
+**Motion vectors and `prev_time` (iteration 5):** The motion vector fix was an architectural change to how the model is called. Every vertex shader evaluates the model twice, at two different times. The model functions must accept `time` as a parameter rather than reading it from the uniform.
 
-**Arc-length correction (iteration 6):** Without the sagitta correction, grass visibly grows longer in gusts. The bands displace horizontally without shortening the stem, so a strongly bent blade would be longer than its authored height.
+**Arc-length correction (iteration 6):** Without the sagitta correction, grass grows longer in gusts. The bands displace horizontally without shortening the stem. A strongly bent blade would be longer than its authored height.
 
-**The hash function and the CI failure:** The original implementation used `fract(sin(x) * 43758.5453)`. Everything looked correct on NVIDIA, but on AMD the L2/L3 cross-fade band had a visible shearing artefact. After three days of debugging: `sin` is only guaranteed to a few ULP, and the two GPUs disagreed by about 1.5 ULP. The fix was the integer-only lowbias32 finaliser — five operations, no `sin`, bit-stable across every backend.
+**The hash function and the CI failure:** The original implementation used `fract(sin(x) * 43758.5453)`. Everything looked correct on NVIDIA. On AMD the L2/L3 cross-fade band had a visible shearing artefact. Three days of debugging: `sin` is only guaranteed to a few ULP. The two GPUs disagreed by about 1.5 ULP. The fix was the integer-only lowbias32 finaliser: five operations, no `sin`, bit-stable across every backend.
 
 ---
 
 ## 8. Interaction Field
 
-The interaction system lets moving bodies — players, NPCs, vehicles — push grass aside. It is a separate displacement field maintained as a camera-relative `Rgba16Float` texture (default 512² covering 64 m, snapped to the texel grid so there is no swimming under camera motion):
+The interaction system lets moving bodies (players, NPCs, vehicles) push grass aside. It is a separate displacement field maintained as a camera-relative `Rgba16Float` texture (default 512² covering 64 m, snapped to the texel grid so there is no swimming under camera motion):
 
 | Channel | Contents |
 |---|---|
@@ -1655,13 +1655,13 @@ The interaction system lets moving bodies — players, NPCs, vehicles — push g
 
 ### 8.1 How scrolling works (no swimming)
 
-The interaction field is snapped to the texel grid. Snapping means: the field's origin is at `floor(camera_position / texel_size) * texel_size`, not at the camera's exact position. A texel at pixel (x, y) always samples the same world position regardless of sub-texel camera motion — the field scrolls in whole-texel increments. Without this snap, the interaction displacement would crawl under the grass even when nothing is touching it, producing a rippling artefact that looks like the ground is breathing.
+The interaction field is snapped to the texel grid. The field's origin is at `floor(camera_position / texel_size) * texel_size`, not at the camera's exact position. A texel at pixel (x, y) always samples the same world position regardless of sub-texel camera motion. The field scrolls in whole-texel increments. Without this snap, the interaction displacement would crawl under the grass even when nothing is touching it. This produces a rippling artefact that looks like the ground is breathing.
 
-The scroll is a GPU copy from one region of the field to another, offset by the snap delta. It is a copy, not a resample — because the delta is always an integer number of texels, no filtering is needed and no information is lost.
+The scroll is a GPU copy from one region of the field to another, offset by the snap delta. It is a copy, not a resample. The delta is always an integer number of texels. No filtering is needed. No information is lost.
 
 ### 8.2 The interactor splat
 
-Each `FoliageInteractor` is a sphere with position, radius and velocity. The splat compute shader projects the sphere onto the field, computes displacement magnitude from velocity, and writes `max(existing, new)` into the field's RG channels. Recovery is exponential: each frame, every texel decays as `value *= exp(-dt / tau)`, where `tau` comes from the foliage type's `interaction_stiffness`.
+Each `FoliageInteractor` is a sphere with position, radius and velocity. The splat compute shader projects the sphere onto the field, computes displacement magnitude from velocity, and writes `max(existing, new)` into the field's RG channels. Recovery is exponential. Each frame, every texel decays as `value *= exp(-dt / tau)`, where `tau` comes from the foliage type's `interaction_stiffness`.
 
 ### 8.3 The vertex shader side
 
@@ -1685,7 +1685,7 @@ The interaction bend is currently applied identically at `t` and `t - dt`, so it
 
 ### 8.4 Zero overhead when absent
 
-When `FoliageInteractionPass` is not enabled, `frame.foliage_interaction` is an unwritten slot and the bind group supplies a 1×1 placeholder texture with `FOLIAGE_FLAG_INTERACTION_VALID` clear. The early return produces no bend at all.
+When `FoliageInteractionPass` is not enabled, `frame.foliage_interaction` is an unwritten slot. The bind group supplies a 1×1 placeholder texture with `FOLIAGE_FLAG_INTERACTION_VALID` clear. The early return produces no bend at all.
 
 ### 8.5 The Rust-side interactor API
 
@@ -1763,11 +1763,11 @@ fn vs_main(
 
 ### 9.1 Why Vertexless Works: Per-Instance Strip Restart
 
-The answer is in the WebGPU spec's primitive-assembly algorithm: **assembly runs per instance**. A strip is split on the restart value only for *indexed* draws, so a non-indexed instanced strip draw cannot span an instance boundary. The hardware resets the strip for every `instance_index`, and each blade or card is exactly one primitive — no degenerate triangles, no stitch vertices, no index buffer.
+The answer is in the WebGPU spec's primitive-assembly algorithm: **assembly runs per instance**. A strip is split on the restart value only for *indexed* draws. A non-indexed instanced strip draw cannot span an instance boundary. The hardware resets the strip for every `instance_index`. Each blade or card is exactly one primitive. No degenerate triangles. No stitch vertices. No index buffer.
 
 ### 9.2 The 8-Target Pipeline
 
-Grass must be lit like the rest of the scene. That means deferred lighting, shadows, SSAO, SSR, GI, correct TAA — all of it — which means it must write into the same G-buffer the `GBufferPass` fills:
+Grass must be lit like the rest of the scene. That means deferred lighting, shadows, SSAO, SSR, GI, correct TAA. All of it. It must write into the same G-buffer the `GBufferPass` fills:
 
 ```
  Slot  Name          Format           Grass writes
@@ -1820,16 +1820,16 @@ pub fn color_target_states() -> [Option<wgpu::ColorTargetState>; 8] {
 
 The first draft of the foliage plan proposed a pipeline writing only 5 targets to save tile-memory bandwidth. It was wrong.
 
-A pipeline's fragment targets must match the render pass's colour attachments *element-for-element*. `RenderPassContext::check_compatible` compares the lists with strict equality. A 5-target pipeline therefore requires its own render pass, which breaks subpass fusion. Breaking the chain forces a tile store and reload of every touched attachment. At 1080p and 48 bytes per sample, that is ~100 MiB each way on a tile-based GPU — *far more* than the lever was going to save.
+A pipeline's fragment targets must match the render pass's colour attachments *element-for-element*. `RenderPassContext::check_compatible` compares the lists with strict equality. A 5-target pipeline requires its own render pass. That breaks subpass fusion. Breaking the chain forces a tile store and reload of every touched attachment. At 1080p and 48 bytes per sample, that is ~100 MiB each way on a tile-based GPU. That is *far more* than the lever was going to save.
 
-The lever that actually works: an 8-target pipeline with identical formats, three `ColorWrites::empty()` masks, and those three `@location`s omitted from the fragment shader.
+The lever that works: an 8-target pipeline with identical formats, three `ColorWrites::empty()` masks, and those three `@location`s omitted from the fragment shader.
 
 ### 9.4 LOD Cross-Fade: Stochastic Dither
 
 Between LOD bands, both representations draw simultaneously. Every blade tests against a threshold composed of two parts:
 
 - A **stable per-blade hash** (derived from the tile coordinate and placement lane, never from frame state).
-- A **per-pixel, per-frame dither** (interleaved gradient noise), so the pattern decorrelates across frames and TAA integrates it away.
+- A **per-pixel, per-frame dither** (interleaved gradient noise). The pattern decorrelates across frames and TAA integrates it away.
 
 ```wgsl
 fn foliage_dither(pixel: vec2<f32>, frame: u32) -> f32 {
@@ -1851,7 +1851,7 @@ if input.fade < threshold {
 
 #### Symmetric by Construction
 
-The alpha function `foliage_cross_fade` is designed so that at any threshold the near LOD's weight is `f` and the far LOD's is `1 - f`. The two sum to exactly one blade's worth of coverage everywhere in the band:
+The alpha function `foliage_cross_fade` is designed so at any threshold the near LOD's weight is `f` and the far LOD's is `1 - f`. The two sum to exactly one blade's worth of coverage everywhere in the band:
 
 ```wgsl
 fn foliage_cross_fade(

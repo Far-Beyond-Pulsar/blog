@@ -1,7 +1,7 @@
 ---
 title: "Rendering a Million Blades of Grass: Helio's GPU-Driven Foliage System"
 date: 2026-08-02
-author: Pulsar Engine Team
+author: tristanpoland
 tags: ["rust", "helio", "graphics", "foliage", "gpu-compute", "rendering", "pulsar"]
 description: "A deep dive into Helio's GPU-driven foliage system — tile ring residency, three-band wind, correct motion vectors, and 1M blades under 3ms."
 thumbnail: /post_thumb/foliage.png

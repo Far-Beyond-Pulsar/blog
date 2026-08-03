@@ -19,7 +19,7 @@
     "katex": "^0.16.28",
     "lucide-react": "^0.563.0",
     "mermaid": "^11.12.2",
-    "next": "^15.5.22",
+    "next": "16.1.4",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-markdown": "^10.1.0",

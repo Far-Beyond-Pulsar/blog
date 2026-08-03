@@ -35,7 +35,7 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: out/server/app
+          path: out
 
   deploy:
     needs: build

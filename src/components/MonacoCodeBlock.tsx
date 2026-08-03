@@ -151,7 +151,7 @@ export default function MonacoCodeBlock({ lang, code }: { lang: string; code: st
           tabCompletion:              'off',
           wordBasedSuggestions:       'off',
           parameterHints:             { enabled: false },
-          hover:                      { enabled: false },
+          hover:                      { enabled: 'off' },
           fixedOverflowWidgets:       true,
         }}
         loading={

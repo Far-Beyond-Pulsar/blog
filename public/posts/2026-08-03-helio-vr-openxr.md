@@ -316,7 +316,7 @@ pub(crate) xr_mirror_bind_group: Option<(u32, wgpu::BindGroup)>,
 pub(crate) xr_mirror_format: Option<wgpu::TextureFormat>,
 ```
 
-`xr_depth_texture` is a `Depth32Float` 2-layer array created by `create_xr_depth_resources` in `setup.rs:48`. It is the depth-stencil attachment for the multiview render pass. A `D2Array` view is the target that the graph executor binds when `multiview_mask = 0b11`. A separate `D2` view of layer 0 is provided for passes that sample depth as a plain `texture_depth_2d`—HiZ construction, lens flare, and SSAO all need this, and a `D2Array` view cannot be bound to a `D2` bind-group entry.
+`xr_depth_texture` is a `Depth32Float` 2-layer array created by `create_xr_depth_resources` in `setup.rs:48`. It is the depth-stencil attachment for the multiview render pass. A `D2Array` view is the target the graph executor binds when `multiview_mask = 0b11`. A separate `D2` view of layer 0 is provided for passes that sample depth as a plain `texture_depth_2d`. HiZ construction, lens flare, and SSAO all need this. A `D2Array` view cannot be bound to a `D2` bind-group entry.
 
 `xr_mirror_bind_group` is cached per swapchain image index. The key `(u32, BindGroup)` lets the blit reuse the bind group across frames for the same image index, rebuilding only when the acquired image changes:
 
@@ -327,7 +327,7 @@ if self.xr_mirror_bind_group.as_ref().map(|(k, _)| *k) != Some(image_index) {
 }
 ```
 
-The mirror pipeline is lazily created and cached. It is keyed on the mirror surface's colour format, which is set by `set_xr_mirror_format` and typically `Bgra8UnormSrgb` on Windows. When the format changes—a monitor resolution change or a window move between displays with different pixel formats—the pipeline is dropped and rebuilt on the next `blit_xr_to_mirror` call.
+The mirror pipeline is lazily created and cached. It is keyed on the mirror surface's colour format, set by `set_xr_mirror_format` and typically `Bgra8UnormSrgb` on Windows. When the format changes, a monitor resolution change or a window move between displays with different pixel formats, the pipeline is dropped and rebuilt on the next `blit_xr_to_mirror` call.
 
 ---
 
@@ -335,11 +335,11 @@ The mirror pipeline is lazily created and cached. It is keyed on the mirror surf
 
 `Renderer::render_xr()` at `render.rs:675` drives the XR frame lifecycle in six phases.
 
-Phase one pumps OpenXR events. `session.poll_events()` drives the state machine. `SessionEvent::Exit` and `LossPending` return early. If `session_begun` is false—the runtime has accepted `xrBeginSession` but the session has not yet reached `SYNCHRONIZED`—the function sleeps 10 ms and returns. Rate-limited logging suppresses the "session not begun" message to once per 60 skips.
+Phase one pumps OpenXR events. `session.poll_events()` drives the state machine. `SessionEvent::Exit` and `LossPending` return early. If `session_begun` is false, the runtime has accepted `xrBeginSession` but the session has not yet reached `SYNCHRONIZED`, the function sleeps 10 ms and returns. Rate-limited logging suppresses the "session not begun" message to once per 60 skips.
 
-Phase two calls `wait_frame()` and `begin_frame()`. The OpenXR frame lifecycle contract is strict and non-negotiable. Every `wait_frame` must be paired with `begin_frame`, and every frame must end with `end_frame`—whether the runtime asked the app to render or not. Skipping `begin_frame` causes the next `wait_frame` to block indefinitely. The compositor expects the frame pacing sequence to be unbroken.
+Phase two calls `wait_frame()` and `begin_frame()`. The OpenXR frame lifecycle contract is strict. Every `wait_frame` must pair with `begin_frame`. Every frame must end with `end_frame` whether the runtime asked the app to render or not. Skipping `begin_frame` causes the next `wait_frame` to block indefinitely.
 
-Phase three locates the per-eye views. `session.locate_views(display_time, &stage_transform)` returns a `LocatedViews` with raw OpenXR views in stage space and `ViewPose` values transformed into engine world space. The `world_from_stage` matrix is the locomotion hook. It starts as identity. Joystick input modifies it—translating, rotating. The scene content stays in world space. The player moves the stage-space anchor instead.
+Phase three locates the per-eye views. `session.locate_views(display_time, &stage_transform)` returns a `LocatedViews` with raw OpenXR views in stage space and `ViewPose` values transformed into engine world space. The `world_from_stage` matrix is the locomotion hook. It starts as identity. Joystick input modifies it, translating and rotating. The scene content stays in world space. The player moves the stage-space anchor instead.
 
 Phase four acquires one swapchain image and renders both eyes into it sequentially. Each eye gets its own `GpuCameraUniforms`, its own representative camera, its own debug camera buffer, and its own layer view from the swapchain. `submit_frame` is called once per eye with `multiview = false`:
 

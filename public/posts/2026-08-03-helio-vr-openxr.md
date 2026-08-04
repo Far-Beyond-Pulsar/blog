@@ -7,13 +7,13 @@ description: "How Helio drives an HMD through OpenXR — Vulkan instance and dev
 thumbnail: /post_thumb/vr2.png
 ---
 
-Helio's renderer was designed for flat screens from the start. Single camera, deferred shading, temporal accumulation, shadow cascades, foliage, water, post-processing — fifty passes wired into a graph that targets one `wgpu::TextureView` of your monitor's resolution. Adding VR meant the same pipeline had to render two views of the same scene at 90 Hz with asymmetric per-eye frustums, controller input through a runtime that insists on owning your GPU device, and a swapchain whose images you are not allowed to free.
+Helio's renderer was built for flat screens. Single camera, deferred shading, temporal accumulation, shadow cascades, foliage, water, post-processing. Fifty passes wired into a graph targeting one `wgpu::TextureView` at your monitor's resolution. VR meant the same pipeline had to render two views at 90 Hz with asymmetric per-eye frustums. Controller input through a runtime that owns your GPU device. A swapchain whose images you cannot free.
 
-The guiding principle was not to build a parallel VR pipeline. It was to activate the existing forward-capable pipeline in stereo mode. `RendererConfig::enable_xr` flips a flag at build time. The graph executor injects `multiview_mask = 0b11` on every render pass. The texture pool allocates all internal targets as 2-layer `D2Array` textures. The camera storage buffer grows from one slot to two. Every existing shader, every post-effect, every draw call works unchanged. The same `submit_frame` call with a different texture view.
+The principle was straightforward: activate the existing forward-capable pipeline in stereo mode. `RendererConfig::enable_xr` flips a flag at build time. The graph executor injects `multiview_mask = 0b11` on every render pass. The texture pool allocates internal targets as 2-layer `D2Array` textures. The camera storage buffer grows from one slot to two. Every shader, every post-effect, every draw call works unchanged. The same `submit_frame` call with a different texture view.
 
-Getting that to work meant building a bridge between two GPU abstraction layers that were never designed to talk to each other. wgpu exposes a safe Rust API over Vulkan, DirectX, and Metal. OpenXR expects raw Vulkan handles — `VkInstance`, `VkPhysicalDevice`, `VkDevice`, `VkImage` — and insists on creating them itself through `xrCreateVulkanInstanceKHR` and `xrCreateVulkanDeviceKHR`. The runtime injects its own extensions and picks the physical device the HMD is actually driven by. On a laptop with integrated and discrete GPUs, the runtime picks the discrete one. You cannot create your own `VkInstance` and hand it to OpenXR. The runtime rejects it.
+Building that bridge meant reaching into wgpu and extracting raw Vulkan handles. OpenXR expects `VkInstance`, `VkPhysicalDevice`, `VkDevice`, `VkImage`. It insists on creating them itself through `xrCreateVulkanInstanceKHR` and `xrCreateVulkanDeviceKHR`. The runtime injects its own extensions and picks the physical device the HMD is driven by. On a laptop with integrated and discrete GPUs, the runtime picks the discrete one. You cannot create your own `VkInstance` and hand it to OpenXR. The runtime rejects it.
 
-We had to reach inside wgpu, extract its raw Vulkan handles through `as_hal::<Vulkan>()`, hand them to OpenXR, let OpenXR create new handles, and wrap those back into wgpu objects through `Instance::from_raw`, `expose_adapter`, `device_from_raw`, and `create_device_from_hal`. Every one of those calls is `unsafe`. Every one is pinned to the exact wgpu 30.0.0 hal API surface. The boundary is thin, version-sensitive, and cannot be tested without a headset.
+Every handle came out through `as_hal::<Vulkan>()`. Every wrapped handle went back through `Instance::from_raw`, `expose_adapter`, `device_from_raw`, and `create_device_from_hal`. Every one of those calls is `unsafe`. Every one is pinned to the exact wgpu 30.0.0 hal API surface. The boundary is thin, version-sensitive, and cannot be tested without a headset.
 
 ---
 
@@ -32,7 +32,7 @@ let extensions_cchar: Vec<_> = extensions.iter().map(|s| s.as_ptr()).collect();
 
 `desired_extensions` returns wgpu-hal's list: `VK_KHR_surface`, `VK_KHR_win32_surface` (or the platform equivalent), debug extensions, and the timeline semaphore extension. These are the exact extensions wgpu expects to be present on a normal `VkInstance`. We build a `VkInstanceCreateInfo` from them and pass the pointer to OpenXR.
 
-The `get_instance_proc_addr` transmute is the ugliest part:
+The `get_instance_proc_addr` transmute sits at the boundary:
 
 ```rust
 let get_instance_proc_addr = unsafe {
@@ -43,9 +43,9 @@ let get_instance_proc_addr = unsafe {
 };
 ```
 
-`ash` and `openxr::sys` both define this function pointer type, but they define it as separate types. The ABI is identical — both are the raw `PFN_vkVoidFunction (*)(VkInstance, const char*)` from the Vulkan header — but Rust treats them as incompatible. The `transmute` is a statement that they are layout-identical. If ash ever changes its function pointer ABI this breaks silently.
+Both `ash` and `openxr::sys` define this function pointer type. They define it as separate types. The ABI is identical, the raw `PFN_vkVoidFunction (*)(VkInstance, const char*)` from the Vulkan header, but Rust treats them as incompatible. The `transmute` asserts they are layout-identical. If ash ever changes its function pointer ABI this breaks silently.
 
-OpenXR merges its own required extensions into the `VkInstanceCreateInfo` — `VK_KHR_external_memory_capabilities`, `VK_KHR_get_physical_device_properties2`, the platform-specific surface extension for the compositor, and debug utils if available. The resulting `VkInstance` is wrapped back into wgpu through `from_raw`:
+OpenXR merges its own required extensions into the `VkInstanceCreateInfo`: `VK_KHR_external_memory_capabilities`, `VK_KHR_get_physical_device_properties2`, the platform-specific surface extension for the compositor, and debug utils if available. The resulting `VkInstance` is wrapped back into wgpu through `from_raw`:
 
 ```rust
 let hal_instance = unsafe {
@@ -57,7 +57,7 @@ let hal_instance = unsafe {
 };
 ```
 
-The `from_raw` call takes ownership of the `VkInstance` and treats it as if wgpu-hal had created it. wgpu's resource tracker, its deferred barrier logic, its allocation pools — all of them now operate on an instance whose creation they did not control. If OpenXR injected an extension wgpu does not know about, `from_raw` returns an error.
+The `from_raw` call takes ownership of the `VkInstance`. It treats it as if wgpu-hal had created it. wgpu's resource tracker, its deferred barrier logic, its allocation pools all operate on an instance whose creation they did not control. If OpenXR injected an extension wgpu does not know about, `from_raw` returns an error.
 
 The device path is deeper. The physical device comes from OpenXR:
 
@@ -67,7 +67,7 @@ let vk_physical_device = unsafe {
 };
 ```
 
-This is `xrGetVulkanGraphicsDevice2KHR`. The runtime knows which GPU the HMD is physically connected to. On a laptop with integrated and discrete GPUs, the runtime returns the discrete one. The function takes the raw `VkInstance` handle cast to a `u64` — the same instance we just created through OpenXR.
+This is `xrGetVulkanGraphicsDevice2KHR`. The runtime knows which GPU the HMD is connected to. On a laptop with integrated and discrete GPUs, the runtime returns the discrete one. The function takes the raw `VkInstance` handle cast to a `u64`, the same instance we just created through OpenXR.
 
 The HAL adapter is exposed through `expose_adapter`:
 
@@ -120,7 +120,7 @@ The `device_desc` carries the limits separately because this path bypasses `requ
 
 ## Limits Negotiation When OpenXR Owns the Device
 
-`request_device` does not get called. OpenXR owns the `VkDevice`, so wgpu's normal device creation pipeline`—where it validates limits against the adapter and negotiates them down to what the backend supports`—is replaced entirely. The limits are built in `create_wgpu_device` from `hal_adapter.capabilities.limits`:
+`request_device` does not get called. OpenXR owns the `VkDevice`, so wgpu's normal device creation pipeline where it validates limits against the adapter and negotiates them down is replaced entirely. The limits are built in `create_wgpu_device` from `hal_adapter.capabilities.limits`:
 
 ```rust
 let mut limits = hal_adapter.capabilities.limits.clone();
@@ -132,7 +132,7 @@ limits.max_buffer_size = limits.max_buffer_size.min(u32::MAX as u64);
 
 The `max_sampled_textures` cap at 256 mirrors Helio's bindless texture table limit. The `max_multiview_view_count = max(2)` ensures multiview can address both eyes even if the adapter reports a lower default.
 
-The `max_buffer_size` cap exists because wgpu-core has a hard assertion at `wgpu-core/src/indirect_validation/draw.rs:72` that `max_buffer_size <= u32::MAX`. On a GPU with Resizable BAR or large address space—an RTX 4090 reports 16 GiB of addressable buffer`—this assertion panics at device creation:
+The `max_buffer_size` cap exists because wgpu-core asserts `max_buffer_size <= u32::MAX` at `wgpu-core/src/indirect_validation/draw.rs:72`. An RTX 4090 reports 16 GiB of addressable buffer. That assertion panics at device creation:
 
 ```
 wgpu-core/src/indirect_validation/draw.rs:72: ... assertion failed
@@ -204,7 +204,7 @@ let hal_texture = unsafe {
 };
 ```
 
-`TextureMemory::External` tells wgpu-hal that the image's backing memory is not owned by wgpu and must never be freed. The no-op drop callback means the hal texture wrapper can be dropped without side effects. If wgpu ever tries to destroy this texture through its normal lifecycle—graph rebuild, resize, `Renderer` drop—the no-op callback prevents the `VkImage` from being freed. OpenXR owns the image and returns it to the runtime's pool on `release_image`.
+`TextureMemory::External` tells wgpu-hal that the image's backing memory is not owned by wgpu and must never be freed. The no-op drop callback means the hal texture wrapper can be dropped without side effects. If wgpu tries to destroy this texture through its normal lifecycle, a graph rebuild or `Renderer` drop, the no-op callback prevents the `VkImage` from being freed. OpenXR owns the image. OpenXR returns it to the runtime's pool on `release_image`.
 
 The wgpu texture is created with `TextureUses::UNINITIALIZED`:
 
@@ -217,7 +217,7 @@ let texture = unsafe {
 };
 ```
 
-`UNINITIALIZED` tells wgpu's resource tracker that the image's contents and layout are unknown. On `acquire_image`, the runtime may have transitioned the image to `VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL` or `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` or any other layout. wgpu's tracker emits the first barrier as a legal discard—`VK_IMAGE_LAYOUT_UNDEFINED` to the layout the first render pass expects—without validating the previous state. Using `UNINITIALIZED` instead of a known initial layout avoids a tracker assertion when the runtime's layout does not match wgpu's expectation.
+`UNINITIALIZED` tells wgpu's resource tracker that the image's contents and layout are unknown. On `acquire_image`, the runtime may have transitioned the image to `VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL` or `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` or any other layout. wgpu's tracker emits the first barrier as a legal discard, from `VK_IMAGE_LAYOUT_UNDEFINED` to the layout the first render pass expects, without validating the previous state. Using `UNINITIALIZED` instead of a known initial layout avoids a tracker assertion when the runtime's layout does not match wgpu's expectation.
 
 Two views are created per image. A `D2Array` view for the swapchain array render target and per-layer `D2` views for per-eye rendering:
 
@@ -239,7 +239,7 @@ for layer in 0..array_size {
 
 The array views are what the multiview code path will use. The layer views are what the current dual-pass path uses, passing one eye's layer to each `submit_frame` call.
 
-The 2-layer swapchain is requested first. If the runtime rejects it—SteamVR on some driver versions, older Oculus runtimes—the fallback creates a 1-layer swapchain and `sub_image_rect` splits the image width between the two eyes:
+The 2-layer swapchain is requested first. If the runtime rejects it, SteamVR on some driver versions or older Oculus runtimes, the fallback creates a 1-layer swapchain and `sub_image_rect` splits the image width between the two eyes:
 
 ```rust
 let swapchain = match session.create_swapchain(&swapchain_info(vk_format, width, height, 2)) {
@@ -281,7 +281,7 @@ pub fn vulkan_session_create_info(device: &wgpu::Device) -> Result<openxr::vulka
 }
 ```
 
-`raw_instance()` returns the `ash::Instance`. `raw_physical_device()` returns the `vk::PhysicalDevice`. `raw_device()` returns the `vk::Device`. Each handle is cast to `*const c_void` — the raw pointer form OpenXR's C API expects. The `queue_family_index` and `queue_index` are queried from wgpu-hal's device, which recorded them at its own `device_from_raw` call.
+`raw_instance()` returns the `ash::Instance`. `raw_physical_device()` returns the `vk::PhysicalDevice`. `raw_device()` returns the `vk::Device`. Each handle is cast to `*const c_void`, the raw pointer form OpenXR's C API expects. The `queue_family_index` and `queue_index` are queried from wgpu-hal's device. They were recorded at its own `device_from_raw` call.
 
 The session is created with a guard that keeps the wgpu `Instance` and `Device` alive for the session's lifetime. Without the guard, dropping the `Renderer` would destroy the underlying Vulkan device before the session does:
 
@@ -292,7 +292,7 @@ let (session, frame_waiter, frame_stream) = unsafe {
 };
 ```
 
-The signature pattern here—`create_session_with_guard` taking a `Box<dyn Any>`—is OpenXR's mechanism for associating user data with the session. The box is leaked to the runtime and freed when the session is destroyed. If the guard were not held, `Renderer::drop` would destroy the `VkDevice` while OpenXR still held references to it, causing a use-after-free.
+The signature pattern, `create_session_with_guard` taking a `Box<dyn Any>`, is OpenXR's mechanism for associating user data with the session. The box is leaked to the runtime and freed when the session is destroyed. Without the guard, `Renderer::drop` would destroy the `VkDevice` while OpenXR still held references to it. That is a use-after-free.
 
 ---
 

@@ -15,17 +15,9 @@ UE5 does not solve all of these. Its grass path places instances on the CPU, cul
 
 ---
 
-## The Seven Claims
+## Design Decisions
 
-Helio's foliage system is accountable for seven specific claims.
-
-1. Placement never touches the CPU
-2. Foliage is occlusion-culled
-3. Impostors are first-class and lit through the G-buffer
-4. WPO does not break culling
-5. Wind-correct motion vectors
-6. Interaction is a shipped feature, not a sample-project hack
-7. The far ring has no geometry and no pop
+Every subsystem in Helio's foliage stack made a deliberate choice about where to put the complexity. These are the ones that mattered.
 
 ### Placement never touches the CPU
 

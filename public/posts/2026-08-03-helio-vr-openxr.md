@@ -458,7 +458,7 @@ for (i, space) in spaces.iter().enumerate() {
 }
 ```
 
-`pose_to_mat4` converts the OpenXR `Posef` (quaternion + translation) into a `glam::Mat4`. OpenXR stores quaternions as (x, y, z, w), which matches glam's convention. The returned matrix is `world_from_stage * stage_from_grip`, so the controller follows the player's locomotion. `None` means the hand is not tracked—controller off, session not focused, action not yet bound—and callers keep the previous transform rather than snapping.
+`pose_to_mat4` converts the OpenXR `Posef`, a quaternion and translation, into a `glam::Mat4`. OpenXR stores quaternions as (x, y, z, w) and glam uses the same convention. The returned matrix is `world_from_stage * stage_from_grip`, so the controller follows the player's locomotion. `None` means the hand is not tracked. Controller off, session not focused, action not yet bound. Callers keep the previous transform instead of snapping.
 
 ---
 

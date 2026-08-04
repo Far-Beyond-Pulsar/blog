@@ -394,8 +394,8 @@ The corrected code:
 glam::Mat4::from_cols_array(&[
     m00, 0.0, 0.0, 0.0,       // col 0
     0.0, m11, 0.0, 0.0,       // col 1
-    m20, m21, m22, -1.0,      // col 2 — divide in col2.w
-    0.0, 0.0, depth_translate, 0.0,  // col 3 — translate in col3.z
+    m20, m21, m22, -1.0,      // col 2, divide in col2.w
+    0.0, 0.0, depth_translate, 0.0,  // col 3, translate in col3.z
 ])
 ```
 

@@ -27,9 +27,7 @@ Placement for one tile is one workgroup. Each lane evaluates a stratified candid
 
 Every placed blade is the output of a pure function:
 
-```
-blade = f(tile_coord, lane_index, generation, seed)
-```
+$$\\text{blade} = f(\\text{tile\\_coord},\\; \\text{lane\\_index},\\; \\text{generation},\\; \\text{seed})$$
 
 The function is evaluated identically in WGSL and in Rust. `tile_coord` identifies the tile. `lane_index` is the blade's position within the tile's stratified candidate grid. `generation` is bumped on every terrain or density edit, so re-placing a tile produces a different deterministic set. `seed` is the layer's authored seed, letting two artists paint different random distributions over the same terrain.
 
@@ -251,7 +249,7 @@ Low-frequency, large-amplitude, gust-modulated, coherent across an entire instan
 
 The coherence constant is 0.06 per metre. At that value, sway phase decorrelates over roughly 16 metres.
 
-The bend uses `sin(t) * 0.75 + sin(t * 2.17 + 1.3) * 0.25`. The 2.17 is deliberately not an integer. An exact harmonic makes the motion strictly periodic. The eye picks a one-second loop out of a field instantly. Lateral sway is 35% of downwind. A stem that only moves in the wind plane reads as a hinge, not a plant. Amplitude scales with height squared, the first mode shape of a cantilever beam.
+The bend uses $\\sin(t) \\cdot 0.75 + \\sin(t \\cdot 2.17 + 1.3) \\cdot 0.25$. The 2.17 is deliberately not an integer. An exact harmonic makes the motion strictly periodic. The eye picks a one-second loop out of a field instantly. Lateral sway is 35% of downwind. A stem that only moves in the wind plane reads as a hinge, not a plant. Amplitude scales with height squared, the first mode shape of a cantilever beam.
 
 ### Band 2, branch flutter
 
@@ -267,17 +265,13 @@ The gust function produces a multiplier across the field. A stationary turbulenc
 
 ### Tempo scaling
 
-```wgsl
-fn helio_wind_tempo(speed: f32) -> f32 {
-    return 0.35 + 0.65 * clamp(speed / 5.0, 0.0, 2.0);
-}
-```
+$$\\text{tempo}(s) = 0.35 + 0.65 \\cdot \\text{clamp}\\left(\\frac{s}{5.0},\\; 0.0,\\; 2.0\\right)$$
 
 At zero speed the multiplier is 0.35. Grass in near-still air drifts instead of freezing solid. At 5 m/s it hits 1.0, the authored base frequency.
 
 ### Wind hash, not sin-hash
 
-The noise model uses the lowbias32 integer finaliser. The `fract(sin(x) * 43758.5453)` trick is wrong here. `sin` is only guaranteed to a few ULP. Vendors disagree on large arguments. The same blade hashes differently on two GPUs. Wind phase must be bit-stable. The cross-fade blends two representations of one plant. Any phase difference shows up as a shearing silhouette. The integer-only fix is five operations, no `sin`, bit-stable across every backend.
+The noise model uses the lowbias32 integer finaliser. The $\\text{fract}(\\sin(x) \\cdot 43758.5453)$ trick is wrong here. `sin` is only guaranteed to a few ULP. Vendors disagree on large arguments. The same blade hashes differently on two GPUs. Wind phase must be bit-stable. The cross-fade blends two representations of one plant. Any phase difference shows up as a shearing silhouette. The integer-only fix is five operations, no `sin`, bit-stable across every backend.
 
 ### What the iteration process taught us
 

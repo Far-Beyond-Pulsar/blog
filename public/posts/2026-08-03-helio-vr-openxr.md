@@ -492,13 +492,13 @@ The concrete unsafe operations are:
 
 ## Dual-Pass and the Multiview Gap
 
-The renderer uses dual-pass stereo. Each eye renders through the full forward pipeline. `multiview_mask = 0b11` is injected at every render pass creation—`GraphTexturePool::set_xr_mode(true)` allocates all internal targets as 2-layer `D2Array` textures—but the shaders sample `cameras[0]` exclusively.
+The renderer uses dual-pass stereo. Each eye renders through the full forward pipeline. `multiview_mask = 0b11` is injected at every render pass creation. `GraphTexturePool::set_xr_mode(true)` allocates all internal targets as 2-layer `D2Array` textures. The shaders sample `cameras[0]` exclusively.
 
-Forty-nine WGSL shaders use `cameras[0]` to read camera data. The storage buffer is `array<Camera, 2>` everywhere, and only index 0 is consumed. The switch to `@builtin(view_index)` and `cameras[view_index]` would enable single-pass multiview: one draw call per mesh, vertex cost drops from 2x to 1x, and stereo depth rendering becomes correct. The infrastructure is ready and tested. The shader change is mechanical but touches every WGSL file.
+Forty-nine WGSL shaders use `cameras[0]` to read camera data. The storage buffer is `array<Camera, 2>` everywhere. Only index 0 is consumed. Switching to `@builtin(view_index)` and `cameras[view_index]` would enable single-pass multiview. One draw call per mesh. Vertex cost drops from 2x to 1x. Stereo depth rendering becomes correct. The infrastructure is ready and tested. The shader change is mechanical but touches every WGSL file.
 
-The foliage pass notes: "cameras[0], not `@builtin(view_index)`: that builtin requires the MULTIVIEW feature... A future single-pass stereo path enables multiview and swaps these to `cameras[view_index]`." The foliage placement pass also notes "single-pass stereo cull can union cameras[0] and cameras[1]."
+The foliage pass spells it out: "cameras[0], not `@builtin(view_index)`: that builtin requires the MULTIVIEW feature... A future single-pass stereo path enables multiview and swaps these to `cameras[view_index]`." The foliage placement pass adds "single-pass stereo cull can union cameras[0] and cameras[1]."
 
-For now dual-pass works. The vertex cost at VR resolutions (~2K per eye) is within budget for the forward renderer on current hardware. Stereo depth rendering—where both eyes need the same depth-prepass results without double-processing—is the driver for completing the switch.
+For now dual-pass works. The vertex cost at VR resolutions, roughly 2K per eye, is within budget for the forward renderer on current hardware. Stereo depth rendering where both eyes need the same depth-prepass results without double-processing is the driver for completing the switch.
 
 ---
 

@@ -464,7 +464,7 @@ for (i, space) in spaces.iter().enumerate() {
 
 ## The Demo
 
-`examples/vr/main.rs` is a dual-path application. `try_init_xr()` attempts the full bootstrap sequence: load the OpenXR entry point, create the instance, create the wgpu instance and device through OpenXR, create the session and swapchain. If any step fails—no headset, no loader, Vulkan mismatch—the demo falls back to plain wgpu on the default GPU with WASD + mouse free-cam.
+`examples/vr/main.rs` is a dual-path application. `try_init_xr()` attempts the full bootstrap sequence: load the OpenXR entry point, create the instance, create the wgpu instance and device through OpenXR, create the session and swapchain. If any step fails, no headset or no loader or a Vulkan mismatch, the demo falls back to plain wgpu on the default GPU with WASD and mouse free-cam.
 
 The scene is a 9-bay showcase hallway at human scale. 3-metre ceiling, 4.8-metre width, 8 metres per bay. PBR materials, spot lights, lens flare, volumetric fog, water simulation, GPU particles, emissive/HDR objects, virtual geometry, and colour grading. The same scene renders identically through the headset and the desktop mirror. Eye height is 1.6 metres.
 

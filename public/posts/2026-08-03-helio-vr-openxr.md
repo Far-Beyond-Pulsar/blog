@@ -3,7 +3,7 @@ title: "Helio VR: OpenXR Integration Through wgpu's Vulkan Escape Hatch"
 date: "2026-08-03"
 author: ["tristanpoland"]
 tags: ["rust", "helio", "graphics", "vr", "openxr", "vulkan", "architecture", "pulsar"]
-description: "How Helio drives an HMD through OpenXR — Vulkan instance and device created through the runtime, dual-pass stereo rendering through existing forward pipelines, asymmetric-FOV camera math with a documented clip-space bug, controller input across four interaction profiles, and a PC mirror blit that shows both eyes side by side."
+description: "How Helio drives an HMD through OpenXR: Vulkan instance and device created through the runtime, dual-pass stereo rendering through existing forward pipelines, asymmetric-FOV camera math with a documented clip-space bug, controller input across four interaction profiles, and a PC mirror blit that shows both eyes side by side."
 thumbnail: /post_thumb/vr2.png
 ---
 
@@ -77,7 +77,7 @@ let hal_adapter = hal_instance
     .ok_or_else(|| ...)?;
 ```
 
-This asks wgpu-hal to wrap the `VkPhysicalDevice` in its internal `ExposedAdapter` struct, which carries the device's feature set, limits, and wgpu-hal's own adapter object. The feature set is masked against what the application requested. `Features::MULTIVIEW` is required and the function fails if the HMD does not support it.
+This asks wgpu-hal to wrap the `VkPhysicalDevice` in its internal `ExposedAdapter` struct. The struct carries the device's feature set, limits, and wgpu-hal's own adapter object. The feature set is masked against what the application requested. `Features::MULTIVIEW` is required and the function fails if the HMD does not support it.
 
 The logical device is created through OpenXR, then wrapped with `device_from_raw`:
 
@@ -160,7 +160,7 @@ impl Graphics for WgpuGraphics {
 }
 ```
 
-The only method that differs is `enumerate_swapchain_images`. The built-in one calls `xrEnumerateSwapchainImages` through the `openxr::vulkan::Vulkan` vtable, which returns `SwapchainImageVulkanKHR` structs. But `Swapchain<WgpuGraphics>` has a different `PhantomData` than `Swapchain<openxr::vulkan::Vulkan>`, and the built-in method only implements the generic for the latter. Re-implementing `enumerate_swapchain_images` means calling the raw `fp.enumerate_swapchain_images` function pointer directly, enumerating into a `Vec<SwapchainImageVulkanKHR>`, and extracting the `image: u64` handle from each:
+The only method that differs is `enumerate_swapchain_images`. The built-in one calls `xrEnumerateSwapchainImages` through the `openxr::vulkan::Vulkan` vtable. It returns `SwapchainImageVulkanKHR` structs. But `Swapchain<WgpuGraphics>` has a different `PhantomData` than `Swapchain<openxr::vulkan::Vulkan>`, and the built-in method only implements the generic for the latter. Re-implementing `enumerate_swapchain_images` means calling the raw `fp.enumerate_swapchain_images` function pointer directly, enumerating into a `Vec<SwapchainImageVulkanKHR>`, and extracting the `image: u64` handle from each:
 
 ```rust
 fn enumerate_swapchain_images(
@@ -519,6 +519,6 @@ For now dual-pass works. The vertex cost at VR resolutions, roughly 2K per eye, 
 
 The asymmetry between the landed infrastructure and the pending shader update is deliberate. Dual-pass lets every existing shader, pass, and post-effect work unchanged. The renderer ships VR on dual-pass, measures frame time, and switches to multiview when vertex budget demands it. The infrastructure does not need to be re-debugged at that point.
 
-The scene at `examples/vr/main.rs` renders through a headset at 90 Hz. The swapchain pool is pre-allocated. The mirror blit is lazily cached. The controller spaces are created once and reused. The session state machine pumps silently in the background. And the black wedges from the swapped matrix columns are gone—pinned by three tests in `camera.rs` that document every previous failure mode.
+The scene at `examples/vr/main.rs` renders through a headset at 90 Hz. The swapchain pool is pre-allocated. The mirror blit is lazily cached. The controller spaces are created once and reused. The session state machine pumps silently in the background. The black wedges from the swapped matrix columns are gone. Three tests in `camera.rs` document every previous failure mode.
 
 *Helio is open at [github.com/Far-Beyond-Pulsar/Helio](https://github.com/Far-Beyond-Pulsar/Helio). The XR code lives in `crates/helio-xr/` and the renderer integration in `crates/helio/src/renderer/render.rs`. The VR demo is at `crates/examples/vr/`.*

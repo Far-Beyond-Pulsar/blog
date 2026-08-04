@@ -298,19 +298,6 @@ function TableWrapper({ children }: { children?: React.ReactNode }) {
 const ALERT_TYPES = new Set(['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION']);
 
 // Remark plugin: transform > [!NOTE] / > [!CAUTION] blockquotes into <div data-alert="NOTE">
-// Normalize double backslashes to single backslashes in KaTeX math.
-// The markdown source uses \\frac, \\alpha etc. (JSON-escaped backslashes),
-// but remark-math passes them through verbatim and rehype-katex expects \frac.
-function remarkKaTeXFix(): Plugin<[], Root> {
-  return () => (tree) => {
-    visit(tree, ['math', 'inlineMath'], (node: any) => {
-      if (typeof node.value === 'string') {
-        node.value = node.value.replace(/\\\\/g, '\\');
-      }
-    });
-  };
-}
-
 function remarkAlertPlugin() {
   return (tree: any) => {
     visit(tree, 'blockquote', (node: any, index: number | undefined, parent: any | null) => {
@@ -425,9 +412,7 @@ function remarkRewriteRelative(slug: string): Plugin<[], Root> {
 }
 
 export default function BlogMarkdown({ content, slug }: { content: string; slug?: string }) {
-  const plugins = slug
-    ? [remarkGfm, remarkMath, remarkKaTeXFix, remarkAlertPlugin, remarkRewriteRelative(slug)]
-    : [remarkGfm, remarkMath, remarkKaTeXFix, remarkAlertPlugin];
+  const plugins = slug ? [remarkGfm, remarkMath, remarkAlertPlugin, remarkRewriteRelative(slug)] : [remarkGfm, remarkMath, remarkAlertPlugin];
 
   return (
     <div className="prose">

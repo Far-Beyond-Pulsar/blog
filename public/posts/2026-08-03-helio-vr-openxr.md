@@ -425,7 +425,7 @@ fn fs_mirror(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 
 The inline WGSL uses a constant `OUTPUT_W` and `OUTPUT_H` that are baked into the shader string at pipeline creation time. `select(1u, 0u, uv.x < 0.5)` picks the left half for layer 0 and right half for layer 1. The sample UV remaps each half to the full [0,1] range.
 
-The pipeline is lazily created and cached on the `Renderer`. It is rebuilt when the mirror surface format changes. The bind group is cached per swapchain image index. The four GPU resources involved—pipeline, bind group layout, sampler, bind group keyed on image index—are all lazy-allocated and never touched when the mirror is not active.
+The pipeline is lazily created and cached on the `Renderer`. It is rebuilt when the mirror surface format changes. The bind group is cached per swapchain image index. Pipeline, bind group layout, sampler, and the bind group keyed on image index are all lazy-allocated. None of them are touched when the mirror is not active.
 
 ---
 

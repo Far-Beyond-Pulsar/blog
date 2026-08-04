@@ -42,6 +42,44 @@ function parseFrontmatter(raw) {
   return { data, content: match[2] };
 }
 
+function normalizeMathBackslashes(content) {
+  const lines = content.split('\n');
+  const out = [];
+  let inCode = false;
+  let inMath = false;
+
+  for (const line of lines) {
+    // Track code fences
+    if (/^```/.test(line)) { inCode = !inCode; out.push(line); continue; }
+
+    if (!inCode) {
+      // Track fenced math blocks ($$ on its own line)
+      if (/^\s*\$\$\s*$/.test(line)) {
+        inMath = !inMath;
+        out.push(inMath ? '$$' : '$$');
+        continue;
+      }
+
+      if (inMath) {
+        // Inside fenced math: replace \\ with \
+        out.push(line.replace(/\\\\/g, '\\'));
+        continue;
+      }
+
+      // Outside both: fix inline math spans ($$...$$ and $...$)
+      // Replace \\ with \ inside $$...$$ spans (single-line display math)
+      let fixed = line.replace(/\$\$(.+?)\$\$/g, (_, inner) => '$$' + inner.replace(/\\\\/g, '\\') + '$$');
+      // Replace \\ with \ inside $...$ spans (inline math)
+      fixed = fixed.replace(/\$(.+?)\$/g, (_, inner) => '$' + inner.replace(/\\\\/g, '\\') + '$');
+      out.push(fixed);
+    } else {
+      out.push(line);
+    }
+  }
+
+  return out.join('\n');
+}
+
 export function getPostContent(slug) {
   let filePath = path.join(postsDir, `${slug}.md`);
   if (!fs.existsSync(filePath)) {
@@ -50,7 +88,7 @@ export function getPostContent(slug) {
   }
   const raw = fs.readFileSync(filePath, 'utf-8');
   const { content } = parseFrontmatter(raw);
-  return content;
+  return normalizeMathBackslashes(content);
 }
 
 const slugger = new GithubSlugger();

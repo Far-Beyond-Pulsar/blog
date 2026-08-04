@@ -268,9 +268,7 @@ Nebula is the companion baking tool. It takes a static scene, places acoustic pr
 
 Quasar consumes this data through `AcousticProbeGrid`. The grid is a 3D axis-aligned structure with `grid_origin`, `grid_spacing`, and `grid_dims`. Probes are stored in a flat `Vec<AcousticProbe>` in row-major order. X varies fastest, then y, then z:
 
-```
 $$\\text{index} = z \\cdot d_y \\cdot d_x + y \\cdot d_x + x$$
-```
 
 Given a listener position inside the grid, `cell_index()` computes the enclosing cell `[cx, cy, cz]` and returns the eight corner probe indices. `trilinear_interpolate()` computes fractional weights `wx, wy, wz` within the cell and blends the eight corner values.
 
@@ -505,7 +503,7 @@ pub fn feedback_matrix(input: &[f32; 16]) -> [f32; 16] {
 
 This matrix is orthogonal. $HH^T = I$. Energy is preserved in the feedback loop. Combined with a loop gain of 0.85, below unity, the FDN produces a dense reverb tail that decays smoothly without ringing.
 
-```
+```rust
 fn process_fdn_channel(&mut self, input_sample: f32) -> f32 {
     let signal = self.pre_delay.tap(self.pre_delay_samples);
     self.pre_delay.push(input_sample);

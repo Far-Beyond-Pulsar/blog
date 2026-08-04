@@ -3,53 +3,188 @@ title: "Quasar: A Lock-Free Spatial Audio Engine in Rust"
 date: "2026-08-02"
 author: ["tristanpoland"]
 tags: ["rust", "quasar", "audio", "architecture", "pulsar"]
-description: "A deep technical walkthrough of Quasar, the modular spatial audio engine we built in Rust for Pulsar. The hybrid baked-plus-real-time architecture, the lock-free triple buffer that lets the audio thread never block, the 16-line FDN reverb with a Householder feedback matrix, the GPU compute backend for ray tracing acoustic paths in WGSL, and what it takes to keep the audio thread at zero allocations."
+description: "How we built a modular spatial audio engine where arbitrary multi-channel sources route through a patch bay into positioned world emitters, spatialized per-listener through a zero-alloc DSP pipeline without a single mutex on the audio thread."
 thumbnail: /post_thumb/quasar.png
 ---
 
-## Why Spatial Audio Needs a Different Architecture
+## The Cathedral Problem
 
-Game audio has a threading problem. The audio callback runs at 48 kHz with a buffer of 256 samples. That gives you about 5.33 milliseconds to compute every sample before the buffer underruns and the user hears a pop. In that window you cannot allocate memory. You cannot take a mutex. You cannot write to a log file. And you certainly cannot trace a ray through a BVH to figure out how sound bounces off the cathedral walls.
+A 60-meter Gothic cathedral. Stone floor, vaulted ceiling, eight speakers bolted to the walls. You load an 8-channel audio file. Channel 3 is Back Left in the WAV. The cathedral sends that channel to the Sub/LFE speaker. Channel 6, Side Left in the file, goes to Back Left on the device. No two mappings line up.
 
-The spatial computation takes orders of magnitude longer than the audio callback allows. Where is the sound source. What surfaces does the path cross. How much does the wall absorb. What's the reverb time of the room. A single ray intersection against a scene with 10,000 triangles costs maybe a microsecond on a good day. A full spatial query with direct path, early reflections, and reverb estimation can cost hundreds of microseconds or a few milliseconds. That work needs to happen on a separate thread at a lower rate. The results need to reach the audio thread without either thread ever waiting on the other.
+The listener walks through the nave. Position changes. Heading changes. The spatialization has to track both in real time. Occlusion from the stone columns. Early reflections off the floor. Reverb from the volume of the space. All of it computed at 48 kHz with a 256-sample buffer.
 
-This is the problem Quasar was built for. It is the spatial audio engine for Pulsar, written in Rust. The design centers on a lock-free parameter exchange between a compute thread running at 15-30 Hz and an audio thread running at 48 kHz. The two threads never synchronize. They never block. They communicate through a triple buffer with atomic index swaps.
+Five milliseconds and change before the buffer underruns. In that window, no allocations. No mutexes. No file I/O. No ray tracing through a BVH with 10,000 triangles.
 
-Static scenes with baked acoustics run off a probe grid with trilinear interpolation. Dynamic scenes use a real-time backend that traces paths through a BVH on CPU or GPU. Or you blend both. Real-time ray tracing for direct path and early reflections. Baked data for the late reverb tail. The engine is modular, and you pick your tradeoffs.
-
-This post covers how all of it works. The triple buffer. The probe grid. The material system. The DSP graph. The CPU and GPU backends. The FDN reverb with the Householder feedback matrix that took the longest to tune.
+Quasar is the engine we built for this. It runs inside the Pulsar game engine. The design separates three concerns. Sources are raw multi-channel audio. Scene outputs are positioned world-space emitters. Listeners have a position, a heading, and a physical speaker layout. The only connection between them is an explicit pull: `ChannelPull(source_id, channel, gain_db)`. You wire them up at startup. You rewire them at runtime. The audio thread never notices.
 
 ---
 
-## The Threading Model and the Triple Buffer
+## The Architecture in One Diagram
 
-Three threads touch Quasar's state. The game thread owns the scene and the listener position. The compute thread runs spatial queries. The audio thread processes samples. Only the first two share data freely. The game thread writes new positions, the compute thread reads them. The boundary between the compute thread and the audio thread is where the lock-free contract lives.
+```mermaid
+flowchart LR
+    subgraph Sources["Multi-Channel Sources"]
+        S1["Source A<br/>(7.1.4 WAV)"]
+        S2["Source B<br/>(Stereo Stream)"]
+    end
 
-`ParameterTripleBuffer` in `quasar-core` is the mechanism. It holds three slots of `SpatialCoefficients` behind `UnsafeCell`, with three atomic index pointers and a monotonically increasing version counter:
+    subgraph PatchBay["Patch Bay"]
+        direction TB
+        P1["ChannelPull(A, ch3, -3dB)"]
+        P2["ChannelPull(A, ch5, 0dB)"]
+        P3["ChannelPull(B, ch0, -6dB)"]
+    end
 
-```rust
-pub struct ParameterTripleBuffer {
-    buffers: [UnsafeCell<SpatialCoefficients>; 3],
-    write_index: AtomicU32,
-    read_index: AtomicU32,
-    staging_index: AtomicU32,
-    latest_version: AtomicU64,
-}
+    subgraph Outputs["Scene Outputs (World Emitters)"]
+        O1["Front Left<br/>@ (-7, 5.5, -12)"]
+        O2["Front Right<br/>@ (7, 5.5, -12)"]
+        O3["Sub/LFE<br/>@ (0, 0.3, -7)"]
+    end
+
+    subgraph Spatial["Spatial Compute"]
+        C1["Hybrid Sampler<br/>Probe Grid | Ray Trace"]
+        TB["Triple Buffer<br/>(Lock-Free)"]
+    end
+
+    subgraph DSP["Audio Thread DSP"]
+        D1["Occlusion / Air Abs."]
+        D2["Early Reflections"]
+        D3["FDN Late Reverb"]
+        D4["VBAP Decode"]
+    end
+
+    subgraph Listener["Listener"]
+        L["Position + Heading<br/>Physical Layout"]
+    end
+
+    S1 --> P1 & P2
+    S2 --> P3
+    P1 & P2 --> O1
+    P3 --> O2
+    P1 --> O3
+    O1 & O2 & O3 --> C1
+    C1 --> TB --> DSP
+    L --> DSP
+    DSP --> L
 ```
 
-The producer path is `begin_write()`, mutate, `end_write()`. `begin_write()` returns a `&mut SpatialCoefficients` pointing at whatever slot `write_index` currently owns. `end_write()` stamps the latest version into the slot and atomically swaps `write_index` with `staging_index`. After the swap, the slot the producer was just writing to becomes the staging slot. Available for the consumer to claim on its next `update()`.
+Three registries. Sources hold multichannel audio data. Scene outputs hold world positions and a list of pulls. Listeners hold a position, a heading, and a physical output layout. The spatial compute phase resolves every pair of scene output and listener. The audio thread renders the result through a zero-alloc DSP pipeline. Every layer is independently hot-swappable. Add a source mid-scene. Remove a scene output. Rewire a pull. No glitch.
 
-The consumer path is `update()` then `read()`. `update()` atomically swaps `staging_index` with `read_index`, claiming whatever the producer has published since the last read. `read()` returns `&SpatialCoefficients` pointing at the now-stable read slot.
+---
+
+## The Scene Pipeline
+
+The first version of Quasar took a flat list of `SpatialQuery` pairs. One source position, one listener position, one set of `SpatialCoefficients` back. The audio thread consumed those coefficients through a fixed `AudioNodeGraph`. One input buffer per source. One output buffer. No concept of physical speaker layouts. No listener position. No concept of pulling individual channels from a multi-channel source into a specific world emitter.
+
+The scene pipeline replaced all of that with three phases.
+
+Phase one runs on the API thread. You load sources. You create scene outputs. You add listeners. You connect pulls:
+
+```rust
+use quasar::SpatialAudioEngine;
+use quasar_core::scene_output::*;
+
+let mut engine = SpatialAudioEngine::new(0, 48000.0, 15.0);
+
+let src = engine.load_source(SourceConfig {
+    path: "assets/8_Channel_ID.wav".into(),
+    channels: 8,
+})?;
+
+let fl = engine.add_scene_output(SceneOutputConfig::new(
+    [-7.0, 5.5, -12.0], Movability::Static,
+));
+let fr = engine.add_scene_output(SceneOutputConfig::new(
+    [7.0, 5.5, -12.0], Movability::Static,
+));
+let sub = engine.add_scene_output(SceneOutputConfig::new(
+    [0.0, 0.3, -7.0], Movability::Static,
+));
+
+engine.connect_pull(fl, ChannelPull::new(src, 0, 0.0));
+engine.connect_pull(fr, ChannelPull::new(src, 1, 0.0));
+engine.connect_pull(sub, ChannelPull::new(src, 5, 0.0));
+
+let listener = engine.add_listener(ListenerConfig {
+    position: [0.0, 1.6, 0.0],
+    heading: [0.0, 0.0, -1.0],
+    physical_layout: PhysicalOutputLayout::Surround51,
+});
+```
+
+Phase two runs on the compute thread at 15-30 Hz. `update_scene_spatial()` iterates every scene output and every listener. For each pair, it builds a `SpatialQuery` and sends it through the hybrid sampler. The sampler returns a `SpatialQueryResult`: direct path parameters, early reflections, late reverb estimate. Those get published into the lock-free triple buffer.
+
+Phase three runs on the audio thread at 48 kHz. `process_audio_scene()` takes one source buffer per loaded source and one output buffer per listener. The patch bay sums channel pulls into mono per scene output. The spatial DSP chain processes each mono buffer: occlusion, early reflections, late reverb. The listener decode stage runs VBAP to map the spatialized mono onto the listener's physical speaker layout.
+
+```rust
+let mut src = AudioBuffer::new(8, 256);
+let mut out = AudioBuffer::new(6, 256);
+engine.process_audio_scene(&[&src], &mut [&mut out]);
+```
+
+No allocation. No locking. The buffer sizes are fixed at compile time. The scratch buffers are sized to the maximum number of scene outputs. Everything exists before the first callback fires.
+
+---
+
+## Live Remapping
+
+A scene output is a position and a list of pulls. A pull is three values: a source ID, a channel index, and a gain in dB. Change the position, the compute thread resolves it on the next frame. Change the pull list, the engine rebuilds the patch bay at the next config opportunity. No DSP graph tear-down. No delay line flush. No pop.
+
+```rust
+engine.disconnect_pull(outputs[6], src, 6);
+engine.connect_pull(outputs[6], ChannelPull::new(src, 7, 0.0));
+engine.disconnect_pull(outputs[7], src, 7);
+engine.connect_pull(outputs[7], ChannelPull::new(src, 6, 0.0));
+```
+
+Two calls to disconnect, two calls to connect. The aux channels swap. The cathedral's speaker layout changes without stopping audio. The patch bay rebuilds, the crossfaders smooth the transition over 15 milliseconds, and the listener hears a seamless rewire.
+
+This extends to everything. Add a listener mid-scene. Remove a scene output. Change a pull's gain. None of it requires the audio thread to stop. None of it produces a click. The triple buffer decouples the config path from the real-time path by design.
+
+---
+
+## The Triple Buffer
+
+Three threads touch Quasar's state. The game thread owns the scene and the listener positions. The compute thread runs spatial queries. The audio thread processes samples. The boundary between the compute thread and the audio thread is the lock-free contract.
+
+```mermaid
+sequenceDiagram
+    participant C as Compute Thread<br/>(15-30 Hz)
+    participant TB as Triple Buffer
+    participant A as Audio Thread<br/>(48 kHz)
+
+    C->>TB: begin_write(slot)
+    Note over C: mutate SpatialCoefficients
+    C->>TB: end_write(slot)
+    Note over TB: atomic swap write<>staging
+
+    par every 256-sample block
+        A->>TB: update()
+        Note over TB: atomic swap staging<>read
+        A->>TB: read()
+        Note over A: apply coefficients via crossfader
+    end
+
+    C->>TB: begin_write(slot) [next frame]
+```
+
+`ParameterTripleBuffer` holds three slots of `SpatialCoefficients` behind `UnsafeCell`. Three atomic index pointers track which slot is the write slot, which is the staging slot, and which is the read slot. A monotonically increasing version counter lets the consumer detect new data without a lock.
+
+The producer calls `begin_write()`. This returns a `&mut SpatialCoefficients` pointing at whatever slot `write_index` owns at that moment. The producer mutates the coefficients. It calls `end_write()`. That stamps the version counter into the slot and atomically swaps `write_index` with `staging_index`. After the swap, the slot the producer was just writing to becomes the staging slot. Available for the consumer to claim on its next `update()`.
+
+The consumer path is `update()` then `read()`. `update()` atomically swaps `staging_index` with `read_index`. This claims whatever the producer has published since the last read. `read()` returns a `&SpatialCoefficients` pointing at the now-stable read slot.
 
 Three slots, three indices, always pointing to distinct buffers. The producer and consumer never touch the same slot at the same time. No mutexes. No atomics on the hot path except the two swaps.
 
-`SpatialCoefficients` carries everything the audio thread needs to render spatial audio for a single source:
+The coefficients themselves carry everything the audio thread needs:
 
 ```rust
 pub struct SpatialCoefficients {
     pub source_id: u32,
     pub direct_gain: Band8,
     pub direct_delay_samples: f32,
+    pub direct_azimuth: f32,
+    pub direct_elevation: f32,
     pub early_reflections: Vec<EarlyReflectionCoeffs>,
     pub late_t60: Band8,
     pub late_gain_db: f32,
@@ -57,64 +192,21 @@ pub struct SpatialCoefficients {
 }
 ```
 
-`Band8` is the universal frequency representation. Eight floats covering the standard octave bands from 62.5 Hz to 8 kHz. Every spatial parameter in the engine is frequency-dependent. Direct attenuation. Reverb time. Material absorption. The audio thread receives these as pre-computed coefficients and applies them through biquad filters, fractional delays, and the FDN reverb. It never runs a ray intersection. It never evaluates a material formula. All of that happens on the compute thread.
+`Band8` is the universal frequency representation. Eight floats covering the standard octave bands from 62.5 Hz to 8 kHz. Every spatial parameter in the engine is frequency-dependent. Direct attenuation. Reverb time. Material absorption. The audio thread receives these as pre-computed coefficients. It never runs a ray intersection. It never evaluates a material formula. All of that work happens on the compute thread.
+
+Between the triple buffer read and the DSP graph sits an `EqualPowerCrossfader`. The compute thread publishes new coefficients. The crossfader blends from the old values to the new values over a configurable window. Typically 10-20 milliseconds. The blend uses cosine and sine trajectories: `g_cur = cos(pi * t / 2)`, `g_tgt = sin(pi * t / 2)`. Constant power means `cos^2 + sin^2 = 1`. No volume dip. No volume spike. Just a smooth transition.
 
 ---
 
-## The Probe Grid: Baked Acoustics With Trilinear Interpolation
+## The Hybrid Sampler
 
-The offline path starts with Nebula, the companion baking tool. Nebula takes a static scene, places acoustic probes at regular intervals, and bakes impulse responses at each probe using path tracing. The output is a set of `AcousticProbe` points. Position. Per-band RT60. A time-series of 8-band energy samples.
+`HybridProbeSampler` sits between the compute backend and the engine. It dispatches each spatial query according to the active strategy. Three strategies exist. Each one trades accuracy for cost in a different way.
 
-Quasar consumes this data at runtime through `AcousticProbeGrid`. The grid is a 3D axis-aligned structure with `grid_origin`, `grid_spacing`, and `grid_dims`. Probes are stored in a flat `Vec<AcousticProbe>` in row-major order. X varies fastest, then y, then z:
+`BakedOnly` samples a probe grid at the listener position. It computes inverse-distance attenuation from the source. It returns a `SpatialQueryResult` with no early reflections. Zero ray intersections. Zero material evaluations. The cheapest path. Good for static environments where the acoustics are pre-baked and nothing moves.
 
-```
-index = z * grid_dims[1] * grid_dims[0] + y * grid_dims[0] + x
-```
+`RealTimeOnly` delegates to the `IAcousticComputeBackend` trait. The backend traces rays through the scene. It evaluates material absorption at each hit. It computes specular reflections. It estimates statistical reverb from the room geometry. This path supports dynamic geometry. Moving walls. Collapsing structures. Anything changes the acoustic environment frame to frame.
 
-Given a listener position inside the grid, `cell_index()` computes the enclosing cell `[cx, cy, cz]` and returns the eight corner probe indices. `trilinear_interpolate()` computes fractional weights `wx, wy, wz` within the cell and blends the eight corner values:
-
-```rust
-fn trilinear_interpolate(&self, weights: [f32; 3], corners: [&AcousticProbe; 8]) -> AcousticProbeSample {
-    let [wx, wy, wz] = weights;
-    let c0 = corners[0].t60.lerp(&corners[1].t60, wx);
-    let c1 = corners[2].t60.lerp(&corners[3].t60, wx);
-    let c2 = corners[4].t60.lerp(&corners[5].t60, wx);
-    let c3 = corners[6].t60.lerp(&corners[7].t60, wx);
-    let c01 = c0.lerp(&c1, wy);
-    let c23 = c2.lerp(&c3, wy);
-    let t60 = c01.lerp(&c23, wz);
-    let quality = (1.0 - (wx - 0.5).abs() * 2.0)
-                * (1.0 - (wy - 0.5).abs() * 2.0)
-                * (1.0 - (wz - 0.5).abs() * 2.0);
-    // ...
-}
-```
-
-The `interpolation_quality` field peaks at 1.0 at the center of a cell and falls to 0.0 at the edges. Good for blending decisions. If the listener is near a cell boundary, the interpolation is less reliable. The engine can boost the blend rate or fall back to a nearest-probe sample.
-
-The nebula import bridge lives behind the `nebula-import` feature flag. It deserializes bincode-format bake files and transposes the 8-band impulse response data into `Vec<Band8>`. For irregularly-spaced probe sets, the grid dimensions are set to `[n, 1, 1]` and the sampler falls back to nearest-probe lookup.
-
----
-
-## The Hybrid Sampler: Choosing Your Tradeoff
-
-`HybridProbeSampler` sits between the compute backend and the audio engine. It dispatches each spatial query according to the active `HybridSamplingStrategy`:
-
-```rust
-pub enum HybridSamplingStrategy {
-    BakedOnly,      // probe grid only
-    RealTimeOnly,   // ray tracing only (CPU or GPU)
-    HybridBlend,    // ray tracing for direct + early, grid for late reverb
-}
-```
-
-`BakedOnly` samples the probe grid at the listener position. It computes inverse-distance attenuation from the source and returns a `SpatialQueryResult` with no early reflections. This is the cheapest path. Zero ray intersections. Zero material evaluations. Good for static environments where the acoustics are pre-baked and nothing moves.
-
-`RealTimeOnly` delegates entirely to the `IAcousticComputeBackend` trait. The backend traces rays through the scene. It evaluates material absorption at each hit. It computes specular reflections. It estimates statistical reverb from the room geometry. This path supports dynamic geometry. Moving walls, collapsing structures, anything that changes the acoustic environment frame to frame.
-
-`HybridBlend` calls the real-time backend for direct path and early reflections. Then it overlays the late reverb T60 from the probe grid. This is the interesting middle ground. The direct path and early reflections are the parts of spatial audio where dynamic behavior matters most. A door opening changes the direct path instantly, and the listener hears the difference. The late reverb tail is less position-sensitive within a room. A baked T60 from a probe grid is nearly indistinguishable from a real-time estimate, and it costs nothing to sample.
-
-The `resolve()` method on `HybridProbeSampler` dispatches by strategy:
+`HybridBlend` calls the real-time backend for direct path and early reflections. Then it overlays the late reverb T60 from the probe grid. Direct path and early reflections are where dynamic behavior matters most. A door opening changes the direct path instantly. The listener hears the difference. The late reverb tail is less position-sensitive within a room. A baked T60 from a probe grid is nearly indistinguishable from a real-time estimate. Sampling it costs nothing.
 
 ```rust
 pub fn resolve(&self, query: &SpatialQuery, materials: &dyn MaterialProvider)
@@ -160,11 +252,46 @@ pub fn resolve(&self, query: &SpatialQuery, materials: &dyn MaterialProvider)
 }
 ```
 
-The compute thread calls `resolve()` for each active source at 15-30 Hz and publishes the result through the triple buffer. The audio thread reads the latest coefficients and renders the next block of audio.
+The compute thread calls `resolve()` for each active source at 15-30 Hz. It publishes the result through the triple buffer. The audio thread reads the latest coefficients and renders the next block. No coordination. No waiting.
 
 ---
 
-## The Compute Backends: CPU BVH, WGPU, and a Stub
+## The Baked Path: Probe Grids
+
+Nebula is the companion baking tool. It takes a static scene, places acoustic probes at regular intervals, and bakes impulse responses at each probe using path tracing. The output is a set of `AcousticProbe` points. Position. Per-band RT60. A time-series of 8-band energy samples.
+
+Quasar consumes this data through `AcousticProbeGrid`. The grid is a 3D axis-aligned structure with `grid_origin`, `grid_spacing`, and `grid_dims`. Probes are stored in a flat `Vec<AcousticProbe>` in row-major order. X varies fastest, then y, then z:
+
+```
+index = z * grid_dims[1] * grid_dims[0] + y * grid_dims[0] + x
+```
+
+Given a listener position inside the grid, `cell_index()` computes the enclosing cell `[cx, cy, cz]` and returns the eight corner probe indices. `trilinear_interpolate()` computes fractional weights `wx, wy, wz` within the cell and blends the eight corner values.
+
+```rust
+fn trilinear_interpolate(&self, weights: [f32; 3], corners: [&AcousticProbe; 8]) -> AcousticProbeSample {
+    let [wx, wy, wz] = weights;
+    let c0 = corners[0].t60.lerp(&corners[1].t60, wx);
+    let c1 = corners[2].t60.lerp(&corners[3].t60, wx);
+    let c2 = corners[4].t60.lerp(&corners[5].t60, wx);
+    let c3 = corners[6].t60.lerp(&corners[7].t60, wx);
+    let c01 = c0.lerp(&c1, wy);
+    let c23 = c2.lerp(&c3, wy);
+    let t60 = c01.lerp(&c23, wz);
+    let quality = (1.0 - (wx - 0.5).abs() * 2.0)
+                * (1.0 - (wy - 0.5).abs() * 2.0)
+                * (1.0 - (wz - 0.5).abs() * 2.0);
+    // ...
+}
+```
+
+The `interpolation_quality` field peaks at 1.0 at the center of a cell and falls to 0.0 at the edges. If the listener is near a cell boundary, the interpolation is less reliable. The engine can boost the blend rate or fall back to a nearest-probe sample.
+
+The nebula import bridge lives behind the `nebula-import` feature flag. It deserializes bincode-format bake files and transposes the 8-band impulse response data into `Vec<Band8>`. For irregularly-spaced probe sets, the grid dimensions are set to `[n, 1, 1]` and the sampler falls back to nearest-probe lookup.
+
+---
+
+## The Compute Backends
 
 `IAcousticComputeBackend` defines the interface any real-time backend must implement:
 
@@ -178,9 +305,11 @@ pub trait IAcousticComputeBackend: Send + Sync {
 }
 ```
 
-Three implementations exist. `HardwareAcceleratorStub` is a no-op placeholder. It returns dummy results. Inverse-distance attenuation, no early reflections, a fixed 0.5-second RT60. It exists so the engine compiles and runs without any real backend selected.
+Three implementations exist.
 
-`CpuSimdComputeBackend` is the production CPU path. At construction it builds a BVH from the scene's triangle mesh using the surface area heuristic:
+`HardwareAcceleratorStub` returns dummy coefficients. Inverse-distance attenuation, no early reflections, a fixed 0.5-second RT60. The engine compiles and runs without any real backend selected. Useful for testing. Useful for platforms where no compute backend is available yet.
+
+`CpuSimdComputeBackend` is the production CPU path. It builds a BVH from the scene's triangle mesh using the surface area heuristic.
 
 ```
 For each axis (X, Y, Z):
@@ -191,22 +320,22 @@ For each axis (X, Y, Z):
   Pick the axis and split with the lowest cost.
 ```
 
-Leaf nodes hold up to 4 triangles. Internal nodes store an AABB, child pointers, and the split axis. The BVH traversal is standard. Test the AABB, recurse into children if hit, return the closest intersection.
+Leaf nodes hold up to 4 triangles. Internal nodes store an AABB, child pointers, and the split axis. The BVH traversal is standard. Test the AABB. Recurse into children if hit. Return the closest intersection.
 
-Ray-triangle intersection uses Moller-Trumbore. The `query_spatial` implementation processes sources in parallel with `rayon::par_iter()`. For each source it casts a shadow ray from the listener to the source for occlusion testing. Then it traces recursive specular reflections up to order 3 for early reflections. The late reverb estimate uses Sabine and Eyring statistical formulas computed from the scene's total surface area and per-band absorption:
+Ray-triangle intersection uses Mller-Trumbore. `query_spatial` processes sources in parallel with `rayon::par_iter()`. For each source it casts a shadow ray from the listener to the source for occlusion testing. Then it traces recursive specular reflections up to order 3 for early reflections. The late reverb estimate uses Sabine and Eyring statistical formulas:
 
 ```
 avg_absorption[b] = sum(absorption[b] * triangle_area) / total_surface_area
 Sabine_RT60[b] = 0.161 * V / (S * avg_absorption[b])
 Eyring_RT60[b] = 0.161 * V / (-S * ln(1 - avg_absorption[b]))
-final_RT60[b]  = min(Sabine, Eyring), clamped to [0.1, 10.0]
+final_RT60[b] = min(Sabine, Eyring), clamped to [0.1, 10.0]
 ```
 
-Air absorption follows ISO 9613-1, with oxygen and nitrogen relaxation frequencies computed from temperature and humidity. The per-band attenuation is `exp(-alpha[b] * distance)`.
+Air absorption follows ISO 9613-1. Oxygen and nitrogen relaxation frequencies are computed from temperature and humidity. Per-band attenuation is `exp(-alpha[b] * distance)`.
 
-`WgpuComputeBackend` dispatches the same ray tracing work to the GPU through WGSL compute shaders. The dispatch layout is one workgroup per source-listener pair, with 64 threads per workgroup. Each thread traces one stochastic ray per iteration, accumulating reflection energy and per-band absorption into a shared output buffer.
+`WgpuComputeBackend` dispatches the same ray tracing work to the GPU through WGSL compute shaders. The dispatch layout is one workgroup per source-listener pair. 64 threads per workgroup. Each thread traces one stochastic ray per iteration. Accumulated reflection energy and per-band absorption go into a shared output buffer.
 
-The WGSL shader contains a full Moller-Trumbore implementation and a PCG random number generator for ray direction sampling:
+The WGSL shader contains a full Mller-Trumbore implementation and a PCG random number generator:
 
 ```wgsl
 fn pcg() -> u32 {
@@ -216,19 +345,19 @@ fn pcg() -> u32 {
 }
 ```
 
-The output uses double-buffered staging. Two output buffers and two staging buffers, toggled atomically. The CPU reads the previous frame's results while the GPU processes the current frame. The material evaluation runs on the GPU side through a switch on `model_id`, with identical formulas to the CPU evaluators.
+The output uses double-buffered staging. Two output buffers and two staging buffers. Toggled atomically. The CPU reads the previous frame's results while the GPU processes the current frame. Material evaluation runs on the GPU side through a switch on `model_id`, with identical formulas to the CPU evaluators.
 
 ---
 
-## The Material System: Dynamic Physical Acoustics
+## The Material System
 
 Materials in Quasar are not hardcoded structs. They are dynamic physical transfer functions composed from a `MaterialModelId` and a raw byte-aligned `MaterialParameterBuffer`. The same byte buffer can be cast to a typed struct on the CPU via `bytemuck` or blitted directly to a GPU storage buffer.
 
 Three material models are built in.
 
-**Tabular (model ID 1)** is the simplest. A straightforward lookup table with 24 f32 values. Absorption, scattering, and transmission for each of the 8 octave bands. 96 bytes total. No computation, just a direct read. Good for artist-authored materials where the acoustic properties are measured or tuned by hand.
+**Tabular (model ID 1)** is a lookup table with 24 f32 values. Absorption, scattering, and transmission for each of the 8 octave bands. 96 bytes total. No computation. A direct read. Good for artist-authored materials where the acoustic properties are measured or tuned by hand.
 
-**Delany-Bazley (model ID 2)** implements the empirical porous absorber model. Parameters are flow resistivity in Rayls/m and thickness in meters. Flow resistivity typically ranges from 1,000 to 100,000. Thickness ranges from centimeters to tens of centimeters. For each octave band frequency, the model computes complex characteristic impedance and propagation constant. It then derives surface impedance and finally absorption from the reflection coefficient:
+**Delany-Bazley (model ID 2)** implements the empirical porous absorber model. Parameters are flow resistivity in Rayls/m and thickness in meters. Flow resistivity typically ranges from 1,000 to 100,000. Thickness ranges from centimeters to tens of centimeters. For each octave band frequency, the model computes complex characteristic impedance and propagation constant. Then it derives surface impedance. Then absorption from the reflection coefficient:
 
 ```
 E = rho_0 * f / R_s
@@ -239,72 +368,92 @@ R  = (Zs - Z_0) / (Zs + Z_0)
 alpha = 1.0 - |R|^2
 ```
 
-The complex cotangent is computed manually. The WGSL shader has the same arithmetic. This model is accurate for fibrous absorbers like rockwool, fiberglass, and acoustic foam. A 5cm panel with 20,000 Rayls/m flow resistivity absorbs mostly high frequencies. A 10cm panel with 10,000 Rayls/m absorbs across the full spectrum.
+The complex cotangent is computed manually. The WGSL shader has the same arithmetic. A 5 cm panel with 20,000 Rayls/m absorbs mostly high frequencies. A 10 cm panel with 10,000 Rayls/m absorbs across the full spectrum.
 
-**Resonant Panel (model ID 3)** models membrane absorbers as mass-spring systems. Parameters are panel mass in kg/m² and cavity depth in meters. Panel mass is typically 1-20 kg/m². Cavity depth is typically 0.02-0.5 meters. The resonant frequency is:
+**Resonant Panel (model ID 3)** models membrane absorbers as mass-spring systems. Parameters are panel mass in kg/m and cavity depth in meters. Panel mass is typically 1-20 kg/m. Cavity depth is typically 0.02-0.5 meters.
 
 ```
 f0 = (c_0 / (2 * pi)) * sqrt(rho_0 / (m * d))
-```
-
-With the Q-factor computed empirically from mass and depth, the absorption profile is a Lorentzian peak:
-
-```
 alpha(f) = 0.95 / (1.0 + Q^2 * (f/f0 - f0/f)^2)
 ```
 
-This produces narrow-band absorption centered at the resonant frequency. The kind of behavior you get from a thin plywood panel with an air gap behind it.
+Thin plywood with an air gap. Narrow-band absorption centered at the resonant frequency.
 
-`AcousticMaterialRegistry` manages instances at runtime. Each instance is a `(model_id, parameter_buffer)` pair stored in a `Vec` behind an `RwLock`. Instances are referenced by a `u32` handle, the index into the vector. The registry supports hot-swapping. Updating an instance's parameter buffer takes effect immediately without rebuilding any acceleration structure:
+`AcousticMaterialRegistry` manages instances at runtime. Each instance is a `(model_id, parameter_buffer)` pair stored in a `Vec` behind an `RwLock`. Instances are referenced by a u32 handle, the index into the vector. The registry supports hot-swapping. Updating an instance's parameter buffer takes effect immediately without rebuilding any acceleration structure.
 
 ```rust
 reg.update_instance(handle, new_params);
-// Next query_spatial() call uses the new parameter values.
-// The BVH does not need to be rebuilt.
 ```
 
-On the GPU side, `GpuMaterialLayout::build()` concatenates all parameter buffers into a single byte array with 16-byte alignment per entry. It produces a descriptor array the WGSL shader uses for dispatch.
+The next `query_spatial()` call uses the new parameter values. The BVH does not need to be rebuilt.
 
 ---
 
-## The DSP Graph: Zero Allocation at 48 kHz
+## The DSP Graph
 
-The audio thread runs `AudioNodeGraph`. Every node in the graph pre-allocates its state at construction time. The hot path, the `process()` method called for every 256-sample block, never calls `alloc`. It never takes a lock. It never touches the heap.
+The audio thread runs the DSP pipeline for every 256-sample block. Every node pre-allocates its state at construction time. The hot path, the `process()` method called for every block, never calls `alloc`. It never takes a lock. It never touches the heap.
+
+```mermaid
+flowchart LR
+    subgraph PerOutput["Per Scene Output (Mono)"]
+        direction TB
+        PB["Patch Bay<br/>Sum source[ch] x gain"]
+        O["AirAbsorptionOcclusion<br/>8 biquads + fractional delay"]
+        E["EarlyReflectionDelay<br/>Multi-tap delay line"]
+        R["FDN Reverb<br/>16-line Householder matrix"]
+        M["Mono Sum<br/>occ + early + rev"]
+    end
+
+    subgraph PerListener["Per Listener"]
+        VBAP["VBAP Decode<br/>azimuth to speaker gains"]
+        OUT["Listener Output Buffer"]
+    end
+
+    Sources["Source Buffers"] --> PB
+    PB --> O --> E --> R --> M
+    M --> VBAP --> OUT
+    Coefficients["SpatialCoefficients<br/>(from triple buffer)"] --> O & E & R
+    ListenerConfig["ListenerConfig<br/>(position, heading, layout)"] --> VBAP
+```
 
 `AudioBuffer` is a fixed-size inline array:
 
 ```rust
 pub struct AudioBuffer {
-    data: [[f32; DEFAULT_BLOCK_SIZE]; MAX_AUDIO_CHANNELS],  // 32 x 256
+    data: [[f32; DEFAULT_BLOCK_SIZE]; MAX_AUDIO_CHANNELS],
     num_channels: u16,
     num_samples: u16,
 }
 ```
 
-32 channels at 256 samples each. 32 KiB total, on the stack. No allocation at construction. No allocation at copy. No allocation at clear. The graph owns a `Vec<AudioBuffer>` of scratch buffers sized to the maximum number of concurrently active sources, allocated once at graph construction.
+32 channels at 256 samples each. 32 KiB total. On the stack. No allocation at construction. No allocation at copy. No allocation at clear. The graph owns scratch buffers sized to the maximum number of scene outputs, allocated once at graph construction.
 
-The processing chain for each source flows through five nodes.
+The pipeline per block works in five stages.
 
-**DirectivityNode** applies a source radiation pattern. Four patterns are supported: omnidirectional (gain = 1.0 everywhere), cardioid (gain = 0.5 * (1 + cos(theta)), null at 180 degrees), figure-8 (gain = |cos(theta)|), and spherical harmonics up to order 1.
+Stage one publishes the latest triple-buffer coefficients. An atomic swap, zero copy.
 
-**AirAbsorptionOcclusionNode** applies per-band attenuation and fractional delay. Internally it maintains 8 biquad filters per channel, one per octave band, plus a Hermite-interpolating delay line. The per-band attenuation from the spatial query is converted to lowpass cutoff frequencies:
+Stage two smooths per-pair coefficients through equal-power crossfaders. The compute thread may have published new data since the last block. The crossfader blends from the old coefficients to the new ones over the configured fade window.
+
+Stage three runs the patch bay. Each scene output has a list of pulls. The patch bay iterates those pulls. For each pull it multiplies the source channel samples by the linear gain and accumulates into the scene output's mono buffer. Out-of-range source indices and channel indices are silently skipped. Defensive. No panic.
+
+Stage four is the spatial render. Run once per scene output. Reference listener is listener zero. The occlusion node applies per-band attenuation and fractional delay. Eight biquad filters per channel, one per octave band. A Hermite-interpolating delay line for the direct path delay. The per-band attenuation is converted to lowpass cutoff:
 
 ```
 cutoff[b] = centre_freq[b] * sqrt(attenuation[b]) + 20 Hz
 ```
 
-Lower attenuation means more occlusion. The cutoff shifts lower and rolls off the high frequencies.
+Lower attenuation means more occlusion. The cutoff shifts lower. High frequencies roll off.
 
-**EarlyReflectionDelayNode** implements a multi-tap delay. Input audio is downmixed to mono and pushed through a shared delay line. Each early reflection from the spatial query becomes a tap with a fractional delay and a stereo pan:
+The early reflection node implements a multi-tap delay. Input audio is downmixed to mono and pushed through a shared delay line. Each early reflection from the spatial query becomes a tap with a fractional delay and a stereo pan:
 
 ```
-pan = azimuth / pi                 // [-1, 1]
-angle = pi/2 * (pan + 1) * 0.5     // [0, pi/2]
+pan = azimuth / pi
+angle = pi/2 * (pan + 1) * 0.5
 gain_left = cos(angle)
 gain_right = sin(angle)
 ```
 
-**LateReverbNode** is the FDN. The most algorithmically dense node. 16 delay lines with pairwise coprime lengths spanning from 2 ms to 73 ms at 48 kHz:
+The late reverb node is the FDN. 16 delay lines with pairwise coprime lengths spanning 2 ms to 73 ms at 48 kHz:
 
 ```rust
 const FDN_DELAY_LENGTHS: [usize; 16] = [
@@ -313,7 +462,11 @@ const FDN_DELAY_LENGTHS: [usize; 16] = [
 ];
 ```
 
-Each delay line has a 0.5 Hz sinusoidal LFO adding +/- 2 samples of delay modulation. This smooths out metallic resonances. Each line also has a one-pole lowpass damping filter. The coefficient is derived from the T60: `damping = exp(-3.0 / (avg_t60 * sample_rate))`.
+Each delay line has a 0.5 Hz sinusoidal LFO adding +/- 2 samples of delay modulation. This smooths out metallic resonances. Each line also has a one-pole lowpass damping filter:
+
+```
+damping = exp(-3.0 / (avg_t60 * sample_rate))
+```
 
 The feedback matrix is a Householder reflection:
 
@@ -329,11 +482,9 @@ pub fn feedback_matrix(input: &[f32; 16]) -> [f32; 16] {
 }
 ```
 
-This matrix is orthogonal. `H * H^T = I`. It guarantees energy preservation in the feedback loop. Combined with a loop gain of 0.85, below unity for stability, the FDN produces a dense, natural-sounding reverb tail.
+This matrix is orthogonal. `H * H^T = I`. Energy is preserved in the feedback loop. Combined with a loop gain of 0.85, below unity, the FDN produces a dense reverb tail that decays smoothly without ringing.
 
-Per-sample processing within the FDN:
-
-```rust
+```
 fn process_fdn_channel(&mut self, input_sample: f32) -> f32 {
     let signal = self.pre_delay.tap(self.pre_delay_samples);
     self.pre_delay.push(input_sample);
@@ -358,51 +509,40 @@ fn process_fdn_channel(&mut self, input_sample: f32) -> f32 {
 }
 ```
 
-**MasterDecoderNode** handles output format conversion. Three modes. Binaural with 2 channels and stereo panning from azimuth. VBAP with configurable speaker layouts for stereo, 5.1, 7.1.4, or quad. Ambisonic decoding up to configurable order.
+Stage five is the listener decode. VBAP maps the spatialized mono onto the listener's physical speaker layout. The listener's heading rotates the world-space azimuth so a source the listener faces comes from the front speakers regardless of world rotation.
 
-`EqualPowerCrossfader` sits between the triple buffer read and the DSP graph. When the compute thread publishes new `SpatialCoefficients`, the crossfader blends from the previous values to the new values over a configurable fade window:
-
+```rust
+let heading_yaw = listener.heading[0].atan2(-listener.heading[2]);
+let listener_azimuth = coeff.direct_azimuth - heading_yaw;
+let n = vbap_gains(layout, listener_azimuth, coeff.direct_elevation, &mut gains);
 ```
-g_cur = cos(pi * t / 2)
-g_tgt = sin(pi * t / 2)
-```
 
-The constant-power property, `cos^2 + sin^2 = 1`, ensures no volume dip or spike during the transition. All parameters are crossfaded in lockstep. Direct gain, delay, early reflection taps, and late reverb parameters.
+Each scene output's mono is decoded onto every connected speaker. The VBAP gains are computed fresh per block. The speaker positions come from the listener's `physical_layout` field. Stereo. 5.1. 7.1.4. Quad. Custom. HRTF falls back to stereo for now.
 
 ---
 
 ## What It Costs
 
-The CPU SIMD backend on a Ryzen 9 7950X processes a spatial query for one source against a scene of 10,000 triangles in about 0.2 ms. With 3 bounces of specular reflections. Scaling to 64 sources at 30 Hz gives a compute budget of roughly 12.8 ms per frame. Headroom remains for BVH updates when geometry changes.
+On a Ryzen 9 7950X, the CPU SIMD backend resolves one source against a 10,000-triangle scene in about 0.2 ms. Three bounces of specular reflections. At 30 Hz with 64 sources, the compute budget is roughly 12.8 ms per frame. Headroom remains for BVH updates when geometry changes.
 
-The GPU backend dispatches 256 rays per source-listener pair in a single workgroup. At 64 threads per workgroup, each thread traces 4 rays. The dispatch for 32 sources produces 32 workgroups. Negligible utilization on any modern GPU. Scaling to 256 sources at 16 rays each fits in a single dispatch of 64 workgroups. Completes in roughly 0.1-0.3 ms on an RTX 4090 depending on BVH complexity.
+The GPU backend dispatches 256 rays per source-listener pair in a single workgroup. 64 threads per workgroup. Each thread traces 4 rays. The dispatch for 32 sources produces 32 workgroups. Negligible utilization on any modern GPU. At 256 sources with 16 rays each, a single dispatch of 64 workgroups completes in about 0.1-0.3 ms on an RTX 4090.
 
-The audio thread processes a full DSP chain for a single source in approximately 0.015 ms per 256-sample block on the same CPU. Directivity, occlusion, early reflections, FDN reverb, stereo decode. For 64 simultaneous sources, the total DSP cost per block is about 1 ms. That leaves over 4 ms of headroom in the 5.33 ms budget.
+The audio thread processes the full DSP chain for one scene output in approximately 0.015 ms per 256-sample block. Directivity, occlusion, early reflections, FDN reverb, stereo decode. At 8 outputs per listener, the total DSP cost per block is about 0.12 ms. Headroom of about 5.2 ms in the 5.33 ms budget.
 
-The FDN reverb uses 16 delay lines of up to 3491 samples each. About 218 KB of state per channel. With pre-delay and the Hermite-interpolating delay lines for early reflections, the total DSP memory per source is roughly 256 KB. All pre-allocated.
-
----
-
-## What It Doesn't Do
-
-Quasar does not handle audio file decoding, streaming, or mixing. Those responsibilities belong to the host engine's audio system. Quasar takes a mono or stereo input buffer and applies spatial transforms. It is a spatial audio renderer.
-
-The early reflection model is specular only. Diffuse reflections, the kind that produce the smooth build-up of energy before the reverb tail, are handled implicitly by the FDN reverb rather than explicitly modeled as discrete paths. A full diffuse path tracing backend could improve accuracy for highly scattering environments. The current approach keeps the compute cost bounded.
-
-The GPU backend's staging readback is not fully wired in the current build. The WGSL shader compiles and the bind groups are set up. The results fall back to CPU-computed values while the asynchronous readback pipeline is being finalized.
-
-The probe grid currently requires a regular axis-aligned layout. Irregular probe placements from Nebula bakes are supported but fall back to nearest-probe lookup rather than full trilinear interpolation.
+The FDN reverb uses 16 delay lines of up to 3491 samples each. About 218 KB of state per channel. With pre-delay and the Hermite-interpolating delay lines for early reflections, the total DSP memory per output is roughly 256 KB. All pre-allocated.
 
 ---
 
-## Where It Goes Next
+## The Pattern
 
-The immediate work is finishing the GPU backend's staging readback. Adding support for multiple simultaneous probe grids with spatial blending. Transitioning from one baked acoustic zone to another as the listener moves through connected rooms.
+Sources hold multichannel audio data. Scene outputs hold world positions and a list of pulls. Listeners hold a position, a heading, and a physical speaker layout. The only connection between them is an explicit pull. Not a bus assignment. Not a send level. Not an audio graph connection. A pull.
 
-The FDN reverb is parametric but not adaptive. T60, pre-delay, and late gain are set per-source from the spatial query results. The delay line lengths and feedback matrix are fixed. A variable-length FDN that adjusts its density based on the estimated room volume would improve the sense of spatial presence in small versus large spaces.
+The cathedral demo has 8 speakers and the WAV file has 8 channels. Channel 3 in the WAV goes to physical output 5 on the device. One `ChannelPull` per output. When the G key is pressed, two `disconnect_pull` calls and two `connect_pull` calls swap the aux channels. No clicks. No pops. No DSP graph rebuild.
 
-On the material side, we want to add frequency-dependent scattering for the CPU backend. A fourth material model for structured surfaces. Periodic diffusers, slatted walls, and other geometry whose acoustic behavior depends on the angle of incidence.
+This extends beyond simple remapping. Add a second listener with a different physical layout. The same scene outputs are decoded twice. Once for the stereo headphones. Once for the 5.1 speakers. The compute thread resolves each pair independently. The audio thread writes each listener's output buffer separately. The pull list is shared. The spatialization is per-listener.
 
-The Nebula integration is functional but the format is still in flux. As the baking tool matures, the import bridge will need to handle higher-order ambisonic impulse responses and time-varying reverb parameters for scenes with moving geometry.
+Load a second source mid-scene. A stereo dialog track alongside the 8-channel ambient bed. Create a new scene output for the dialog source. Pull both channels into it. Position it near the altar. The compute thread starts resolving it on the next frame. The patch bay includes it in the next mix. No interruption.
 
-Everything is at github.com/Far-Beyond-Pulsar/Quasar.
+The decoupling matters in practice. The demo cathedral has 60 meters of nave, 12 columns, 8 speakers, and one listener walking through it. The engine renders spatial audio for every speaker on every frame. It never allocates. It never locks. It never drops a sample.
+
+Everything is at [github.com/Far-Beyond-Pulsar/Quasar](https://github.com/Far-Beyond-Pulsar/Quasar).

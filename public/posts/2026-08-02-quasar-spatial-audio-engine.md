@@ -194,7 +194,13 @@ pub struct SpatialCoefficients {
 
 `Band8` is the universal frequency representation. Eight floats covering the standard octave bands from 62.5 Hz to 8 kHz. Every spatial parameter in the engine is frequency-dependent. Direct attenuation. Reverb time. Material absorption. The audio thread receives these as pre-computed coefficients. It never runs a ray intersection. It never evaluates a material formula. All of that work happens on the compute thread.
 
-Between the triple buffer read and the DSP graph sits an `EqualPowerCrossfader`. The compute thread publishes new coefficients. The crossfader blends from the old values to the new values over a configurable window. Typically 10-20 milliseconds. The blend uses cosine and sine trajectories: `g_cur = cos(pi * t / 2)`, `g_tgt = sin(pi * t / 2)`. Constant power means `cos^2 + sin^2 = 1`. No volume dip. No volume spike. Just a smooth transition.
+Between the triple buffer read and the DSP graph sits an `EqualPowerCrossfader`. The compute thread publishes new coefficients. The crossfader blends from the old values to the new values over a configurable window. Typically 10-20 milliseconds. The blend uses cosine and sine trajectories:
+
+$$
+g_0(t) = \\cos\\left(\\frac{\\pi t}{2}\\right),\\qquad g_1(t) = \\sin\\left(\\frac{\\pi t}{2}\\right)
+$$
+
+Constant power means $g_0^2 + g_1^2 = 1$. No volume dip. No volume spike. Just a smooth transition.
 
 ---
 
@@ -263,7 +269,7 @@ Nebula is the companion baking tool. It takes a static scene, places acoustic pr
 Quasar consumes this data through `AcousticProbeGrid`. The grid is a 3D axis-aligned structure with `grid_origin`, `grid_spacing`, and `grid_dims`. Probes are stored in a flat `Vec<AcousticProbe>` in row-major order. X varies fastest, then y, then z:
 
 ```
-index = z * grid_dims[1] * grid_dims[0] + y * grid_dims[0] + x
+$$\\text{index} = z \\cdot d_y \\cdot d_x + y \\cdot d_x + x$$
 ```
 
 Given a listener position inside the grid, `cell_index()` computes the enclosing cell `[cx, cy, cz]` and returns the eight corner probe indices. `trilinear_interpolate()` computes fractional weights `wx, wy, wz` within the cell and blends the eight corner values.
@@ -315,23 +321,36 @@ Three implementations exist.
 For each axis (X, Y, Z):
   Sort triangles by centroid along that axis.
   Build prefix and suffix AABB arrays.
-  For each split position, compute SAH cost:
-    cost = 1.0 + (left_area * i + right_area * (n - i)) / n
+  For each split position:
+    compute SAH cost
   Pick the axis and split with the lowest cost.
 ```
+
+$$
+\\text{cost} = 1.0 + \\frac{\\text{left\\_area} \\cdot i + \\text{right\\_area} \\cdot (n - i)}{n}
+$$
 
 Leaf nodes hold up to 4 triangles. Internal nodes store an AABB, child pointers, and the split axis. The BVH traversal is standard. Test the AABB. Recurse into children if hit. Return the closest intersection.
 
 Ray-triangle intersection uses Mller-Trumbore. `query_spatial` processes sources in parallel with `rayon::par_iter()`. For each source it casts a shadow ray from the listener to the source for occlusion testing. Then it traces recursive specular reflections up to order 3 for early reflections. The late reverb estimate uses Sabine and Eyring statistical formulas:
 
-```
-avg_absorption[b] = sum(absorption[b] * triangle_area) / total_surface_area
-Sabine_RT60[b] = 0.161 * V / (S * avg_absorption[b])
-Eyring_RT60[b] = 0.161 * V / (-S * ln(1 - avg_absorption[b]))
-final_RT60[b] = min(Sabine, Eyring), clamped to [0.1, 10.0]
-```
+$$
+\\bar\\alpha[b] = \\frac{\\sum \\alpha[b] \\cdot A_\\triangle}{A_\\text{total}}
+$$
 
-Air absorption follows ISO 9613-1. Oxygen and nitrogen relaxation frequencies are computed from temperature and humidity. Per-band attenuation is `exp(-alpha[b] * distance)`.
+$$
+T_{60,S}[b] = \\frac{0.161 \\cdot V}{S \\cdot \\bar\\alpha[b]}
+$$
+
+$$
+T_{60,E}[b] = \\frac{0.161 \\cdot V}{-S \\cdot \\ln(1 - \\bar\\alpha[b])}
+$$
+
+$$
+T_{60}[b] = \\min(T_{60,S},\\, T_{60,E}),\\;\\text{clamped to }[0.1,\\, 10.0]
+$$
+
+Air absorption follows ISO 9613-1. Oxygen and nitrogen relaxation frequencies are computed from temperature and humidity. Per-band attenuation is $e^{-\\alpha[b] \\cdot d}$.
 
 `WgpuComputeBackend` dispatches the same ray tracing work to the GPU through WGSL compute shaders. The dispatch layout is one workgroup per source-listener pair. 64 threads per workgroup. Each thread traces one stochastic ray per iteration. Accumulated reflection energy and per-band absorption go into a shared output buffer.
 
@@ -359,23 +378,25 @@ Three material models are built in.
 
 **Delany-Bazley (model ID 2)** implements the empirical porous absorber model. Parameters are flow resistivity in Rayls/m and thickness in meters. Flow resistivity typically ranges from 1,000 to 100,000. Thickness ranges from centimeters to tens of centimeters. For each octave band frequency, the model computes complex characteristic impedance and propagation constant. Then it derives surface impedance. Then absorption from the reflection coefficient:
 
-```
-E = rho_0 * f / R_s
-Zc = Z_0 * (1.0 + 0.0571 * E^-0.754) - j * Z_0 * 0.087 * E^-0.732
-k  = (omega / c_0) * (1.0 + 0.0978 * E^-0.700) - j * (omega / c_0) * 0.189 * E^-0.595
-Zs = -j * Zc * cot(k * thickness)
-R  = (Zs - Z_0) / (Zs + Z_0)
-alpha = 1.0 - |R|^2
-```
+$$
+\\begin{aligned}
+E &= \\frac{\\rho_0 \\cdot f}{R_s} \\\\
+Z_c &= Z_0 \\left(1 + 0.0571 E^{-0.754} - j \\cdot 0.087 \\, E^{-0.732}\\right) \\\\
+k  &= \\frac{\\omega}{c_0} \\left(1 + 0.0978 E^{-0.700} - j \\cdot 0.189 \\, E^{-0.595}\\right) \\\\
+Z_s &= -j \\, Z_c \\, \\cot(k \\cdot d) \\\\
+R   &= \\frac{Z_s - Z_0}{Z_s + Z_0} \\\\
+\\alpha &= 1 - |R|^2
+\\end{aligned}
+$$
 
 The complex cotangent is computed manually. The WGSL shader has the same arithmetic. A 5 cm panel with 20,000 Rayls/m absorbs mostly high frequencies. A 10 cm panel with 10,000 Rayls/m absorbs across the full spectrum.
 
 **Resonant Panel (model ID 3)** models membrane absorbers as mass-spring systems. Parameters are panel mass in kg/m and cavity depth in meters. Panel mass is typically 1-20 kg/m. Cavity depth is typically 0.02-0.5 meters.
 
-```
-f0 = (c_0 / (2 * pi)) * sqrt(rho_0 / (m * d))
-alpha(f) = 0.95 / (1.0 + Q^2 * (f/f0 - f0/f)^2)
-```
+$$
+f_0 = \\frac{c_0}{2\\pi} \\sqrt{\\frac{\\rho_0}{m \\cdot d}},\\qquad
+\\alpha(f) = \\frac{0.95}{1 + Q^2 \\left(\\frac{f}{f_0} - \\frac{f_0}{f}\\right)^2}
+$$
 
 Thin plywood with an air gap. Narrow-band absorption centered at the resonant frequency.
 
@@ -438,20 +459,22 @@ Stage three runs the patch bay. Each scene output has a list of pulls. The patch
 
 Stage four is the spatial render. Run once per scene output. Reference listener is listener zero. The occlusion node applies per-band attenuation and fractional delay. Eight biquad filters per channel, one per octave band. A Hermite-interpolating delay line for the direct path delay. The per-band attenuation is converted to lowpass cutoff:
 
-```
-cutoff[b] = centre_freq[b] * sqrt(attenuation[b]) + 20 Hz
-```
+$$
+f_c[b] = f_{\\text{centre}}[b] \\cdot \\sqrt{\\text{attenuation}[b]} + 20\\,\\text{Hz}
+$$
 
 Lower attenuation means more occlusion. The cutoff shifts lower. High frequencies roll off.
 
 The early reflection node implements a multi-tap delay. Input audio is downmixed to mono and pushed through a shared delay line. Each early reflection from the spatial query becomes a tap with a fractional delay and a stereo pan:
 
-```
-pan = azimuth / pi
-angle = pi/2 * (pan + 1) * 0.5
-gain_left = cos(angle)
-gain_right = sin(angle)
-```
+$$
+\\text{pan} = \\frac{\\text{azimuth}}{\\pi},\\qquad
+\\theta = \\frac{\\pi}{2}(\\text{pan} + 1) \\cdot 0.5
+$$
+
+$$
+g_L = \\cos(\\theta),\\qquad g_R = \\sin(\\theta)
+$$
 
 The late reverb node is the FDN. 16 delay lines with pairwise coprime lengths spanning 2 ms to 73 ms at 48 kHz:
 
@@ -464,9 +487,7 @@ const FDN_DELAY_LENGTHS: [usize; 16] = [
 
 Each delay line has a 0.5 Hz sinusoidal LFO adding +/- 2 samples of delay modulation. This smooths out metallic resonances. Each line also has a one-pole lowpass damping filter:
 
-```
-damping = exp(-3.0 / (avg_t60 * sample_rate))
-```
+$$\\text{damping} = \\exp\\left(-\\frac{3.0}{\\overline{T}_{60} \\cdot f_s}\\right)$$
 
 The feedback matrix is a Householder reflection:
 
@@ -482,7 +503,7 @@ pub fn feedback_matrix(input: &[f32; 16]) -> [f32; 16] {
 }
 ```
 
-This matrix is orthogonal. `H * H^T = I`. Energy is preserved in the feedback loop. Combined with a loop gain of 0.85, below unity, the FDN produces a dense reverb tail that decays smoothly without ringing.
+This matrix is orthogonal. $HH^T = I$. Energy is preserved in the feedback loop. Combined with a loop gain of 0.85, below unity, the FDN produces a dense reverb tail that decays smoothly without ringing.
 
 ```
 fn process_fdn_channel(&mut self, input_sample: f32) -> f32 {

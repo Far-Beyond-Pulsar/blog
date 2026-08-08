@@ -66,22 +66,23 @@ export default function BlogHomeClient({
       <style>{styles}</style>
       <div className="border-b border-white/[0.07] bg-[#030303]">
         <div className="max-w-5xl mx-auto px-5 pt-20 pb-16">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#0ea5e9]/25 bg-[#0ea5e9]/10 text-[#0ea5e9] text-xs font-semibold tracking-wide mb-6">
-            Engineering Blog
-          </div>
+          <p className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.18em] text-white/40 mb-6">
+            <span className="w-8 h-px bg-[#38bdf8]/70" />
+            01 / Engineering Blog
+          </p>
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight leading-tight mb-4">
-            From the Pulsar team
+            From the Pulsar <span className="text-outline" data-text="team.">team.</span>
           </h1>
           <p className="text-white/45 text-base sm:text-lg max-w-2xl leading-relaxed">
             What happens when you build a GPU-driven game engine from nothing —
             the breakthroughs, the rabbit holes, and all the bugs we found along the way.
           </p>
-          <p className="text-xs text-white/20 mt-6">
+          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-white/20 mt-8">
             {filteredPosts.length} of {total} posts
             {(activeAuthor || activeTags.length > 0) && (
               <button
                 onClick={() => { setActiveAuthor(null); setActiveTags([]); }}
-                className="ml-2 text-[#0ea5e9] hover:underline inline"
+                className="ml-3 text-[#0ea5e9] hover:underline normal-case font-sans tracking-normal"
               >
                 &larr; clear filters
               </button>

@@ -137,18 +137,23 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
         <div className="relative max-w-5xl mx-auto px-5 pt-16 pb-12">
           <a
             href={`${BASE}/`}
-            className="inline-flex items-center gap-1.5 text-sm text-white/35 hover:text-white/70 transition-colors mb-8"
+            className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-white/35 hover:text-white/70 transition-colors mb-8"
           >
             ← Back to blog
           </a>
 
-          {meta.tags.length > 0 && (
+          <p className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.18em] text-white/40 mb-5">
+            <span className="w-8 h-px bg-[#38bdf8]/70" />
+            {meta.tags[0] || 'Post'}
+          </p>
+
+          {meta.tags.length > 1 && (
             <div className="flex flex-wrap gap-2 mb-5">
-              {meta.tags.map((tag: string) => (
+              {meta.tags.slice(1).map((tag: string) => (
                 <a
                   key={tag}
                   href={`${BASE}/tags/${tag}`}
-                  className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-white/[0.08] text-white/60 hover:bg-white/[0.14] hover:text-white/90 transition-colors"
+                  className="px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] bg-white/[0.06] text-white/50 hover:bg-white/[0.12] hover:text-white/80 transition-colors"
                 >
                   {tag}
                 </a>
@@ -162,7 +167,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
             <p className="text-white/60 text-lg leading-relaxed mb-6 max-w-2xl">{meta.description}</p>
           )}
 
-          <div className="flex items-center gap-3 text-sm text-white/40">
+          <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.12em] text-white/40">
             <AuthorAvatars authors={authorList} />
             <span>·</span>
             <time>{formatDate(meta.date)}</time>
@@ -187,7 +192,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
             <div className="mt-10 pt-8 border-t border-white/[0.07] flex items-center justify-between">
               <a
                 href={`${BASE}/`}
-                className="text-sm text-white/40 hover:text-white/70 transition-colors"
+                className="font-mono text-[11px] uppercase tracking-[0.14em] text-white/40 hover:text-white/70 transition-colors"
               >
                 ← Back to blog
               </a>
@@ -195,7 +200,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
                 href="https://github.com/Far-Beyond-Pulsar/Pulsar-Native/discussions"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm text-[#0ea5e9] hover:underline"
+                className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#0ea5e9] hover:underline"
               >
                 Continue the discussion on GitHub →
               </a>

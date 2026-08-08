@@ -164,6 +164,56 @@ body {
 /* Monaco replaces rehype-highlight; this rule is kept as a safety net */
 .hljs { background: transparent !important; }
 
+/* ── Editorial system ──────────────────────────────────── */
+
+/* Ghost outline type — stroke drawn on a ::before copy so the
+   solid fill layer hides inner stroke crossings (fixes 't', 'x'). */
+.text-outline,
+.text-outline-accent,
+.text-outline-faint {
+  position: relative;
+  color: var(--outline-fill, #000);
+}
+
+.text-outline::before,
+.text-outline-accent::before,
+.text-outline-faint::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: var(--outline-width, 2px) var(--outline-color, rgba(255, 255, 255, 0.55));
+  pointer-events: none;
+}
+
+.text-outline {
+  --outline-color: rgba(255, 255, 255, 0.55);
+}
+
+.text-outline-accent {
+  --outline-color: rgba(56, 189, 248, 0.85);
+}
+
+.text-outline-faint {
+  --outline-color: rgba(255, 255, 255, 0.18);
+}
+
+/* Marquee tape */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+
+.mask-fade-x {
+  mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent);
+}
+
 /* ── Accessibility ─────────────────────────────────────── */
 
 .dyslexia-font body,

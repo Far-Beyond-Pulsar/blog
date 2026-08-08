@@ -166,13 +166,16 @@ body {
 
 /* ── Editorial system ──────────────────────────────────── */
 
-/* Ghost outline type — stroke drawn on a ::before copy so the
-   solid fill layer hides inner stroke crossings (fixes 't', 'x'). */
+/* Ghost outline type — the element carries the stroke with a transparent
+   fill; a ::before copy paints a solid fill on top, hiding inner stroke
+   crossings ('t', 'x', 'A' junction blobs) so only the outer ring shows. */
 .text-outline,
 .text-outline-accent,
 .text-outline-faint {
   position: relative;
-  color: var(--outline-fill, #000);
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: var(--outline-width, 2px) var(--outline-color, rgba(255, 255, 255, 0.55));
 }
 
 .text-outline::before,
@@ -181,9 +184,9 @@ body {
   content: attr(data-text);
   position: absolute;
   inset: 0;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  -webkit-text-stroke: var(--outline-width, 2px) var(--outline-color, rgba(255, 255, 255, 0.55));
+  color: var(--outline-fill, #000);
+  -webkit-text-fill-color: var(--outline-fill, #000);
+  -webkit-text-stroke: 0;
   pointer-events: none;
 }
 

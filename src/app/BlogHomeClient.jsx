@@ -1,6 +1,7 @@
 "use client";
 
 import PostCard from "@/components/PostCard";
+import OutlineText from "@/components/OutlineText";
 import { useState, useMemo, useRef, useEffect } from "react";
 
 const styles = `
@@ -71,7 +72,7 @@ export default function BlogHomeClient({
             01 / Engineering Blog
           </p>
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight leading-tight mb-4">
-            From the Pulsar <span className="text-outline" data-text="team.">team.</span>
+            From the Pulsar <OutlineText text="team." />
           </h1>
           <p className="text-white/45 text-base sm:text-lg max-w-2xl leading-relaxed">
             What happens when you build a GPU-driven game engine from nothing —

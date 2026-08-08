@@ -166,42 +166,6 @@ body {
 
 /* ── Editorial system ──────────────────────────────────── */
 
-/* Ghost outline type — the element carries the stroke with a transparent
-   fill; a ::before copy paints a solid fill on top, hiding inner stroke
-   crossings ('t', 'x', 'A' junction blobs) so only the outer ring shows. */
-.text-outline,
-.text-outline-accent,
-.text-outline-faint {
-  position: relative;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  -webkit-text-stroke: var(--outline-width, 2px) var(--outline-color, rgba(255, 255, 255, 0.55));
-}
-
-.text-outline::before,
-.text-outline-accent::before,
-.text-outline-faint::before {
-  content: attr(data-text);
-  position: absolute;
-  inset: 0;
-  color: var(--outline-fill, #000);
-  -webkit-text-fill-color: var(--outline-fill, #000);
-  -webkit-text-stroke: 0;
-  pointer-events: none;
-}
-
-.text-outline {
-  --outline-color: rgba(255, 255, 255, 0.55);
-}
-
-.text-outline-accent {
-  --outline-color: rgba(56, 189, 248, 0.85);
-}
-
-.text-outline-faint {
-  --outline-color: rgba(255, 255, 255, 0.18);
-}
-
 /* Marquee tape */
 @keyframes marquee {
   from { transform: translateX(0); }

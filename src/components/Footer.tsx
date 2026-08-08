@@ -1,4 +1,5 @@
 import { Github } from 'lucide-react';
+import OutlineText from './OutlineText';
 
 const BASE = process.env.NEXT_PUBLIC_CUSTOM_BASE_PATH || '';
 
@@ -122,8 +123,8 @@ export default function Footer() {
 
         {/* Ghost wordmark */}
         <div className="select-none pointer-events-none mt-10 -mb-6 text-center">
-          <p className="text-outline-faint text-[clamp(3rem,12vw,10rem)] font-bold tracking-[-0.04em] leading-[0.8] whitespace-nowrap" data-text="PULSAR">
-            PULSAR
+          <p className="text-[clamp(3rem,12vw,10rem)] font-bold tracking-[-0.04em] leading-[0.8] whitespace-nowrap">
+            <OutlineText text="PULSAR" color="rgba(255, 255, 255, 0.18)" strokeWidth={3} />
           </p>
         </div>
       </div>

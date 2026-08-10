@@ -218,10 +218,9 @@ Create and Create Aeronautics take the technique to its extreme. Create moves wh
 Sable calls its moving structures sub-levels. A sub-level holds normal Minecraft chunks, entities, and block-entities, but it exists at a separate dynamic position and orientation inside the level. You walk up the gangplank and the ship is not scenery. It is a world that moves.
 
 ![Create Aeronautics](./assets/create_ship.png)
-
 ![Create Aeronautics](./assets/create_ship_riding.png)
-
 ![Create Aeronautics](./assets/create_ship_sky.png)
+![Create Aeronautics](./assets/bigger_ship.png)
 
 Sable pays for that scale honestly. The project describes itself as incredibly intrusive. Sub-levels ride on extensive mixins into the level's guts, and the compatibility warning sits in the first paragraphs of the README. Every sub-level is a second world instance under the first, with its own chunks, its own ticking, its own physics. That is how a hull the size of a neighbourhood flies. It is also the ceiling the approach bumps against.
 

@@ -14,6 +14,8 @@ type FeedPost = {
   tags?: string[];
 };
 
+export const dynamic = 'force-static';
+
 function escapeXml(value: string): string {
   return value
     .replace(/&/g, '&amp;')

@@ -64,6 +64,11 @@ export const metadata: Metadata = {
     follow: true,
     googleBot: { index: true, follow: true, 'max-image-preview': 'large' },
   },
+  alternates: {
+    types: {
+      'application/rss+xml': `${SITE_ORIGIN_WITH_BASE}/rss.xml`,
+    },
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

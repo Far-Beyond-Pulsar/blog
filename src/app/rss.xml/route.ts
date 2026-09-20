@@ -45,6 +45,7 @@ export function GET() {
     .join('');
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="${SITE_ORIGIN_WITH_BASE}/rss.xsl"?>
 <rss version="2.0">
   <channel>
     <title>${escapeXml(SITE_NAME)}</title>

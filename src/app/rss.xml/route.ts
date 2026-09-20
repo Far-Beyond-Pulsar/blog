@@ -6,6 +6,14 @@ import {
   postUrl,
 } from '@/utils/site';
 
+type FeedPost = {
+  slug: string;
+  title: string;
+  date: string;
+  description?: string;
+  tags?: string[];
+};
+
 function escapeXml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -16,7 +24,7 @@ function escapeXml(value: string): string {
 }
 
 export function GET() {
-  const { posts } = getBlogIndex();
+  const { posts } = getBlogIndex() as { posts: FeedPost[] };
   const items = posts
     .map((post) => {
       const url = postUrl(post.slug);

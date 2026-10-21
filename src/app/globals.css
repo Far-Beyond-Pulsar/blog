@@ -222,3 +222,48 @@ body {
 
 .text-size-large .prose  { font-size: 1.1rem !important; }
 .text-size-larger .prose { font-size: 1.25rem !important; }
+/* Six tracks let short final rows expand without leaving awkward gaps. */
+.markdown-gallery-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.markdown-gallery-grid > figure {
+  grid-column: span var(--gallery-mobile-span);
+}
+
+@media (min-width: 768px) {
+  .markdown-gallery-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .markdown-gallery-grid > figure {
+    grid-column: span var(--gallery-desktop-span);
+  }
+}
+
+/* Compact, touch-friendly scrollbar for large Markdown galleries. */
+.lens-gallery-track {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(180, 195, 220, 0.45) rgba(255, 255, 255, 0.06);
+}
+
+.lens-gallery-track::-webkit-scrollbar {
+  height: 9px;
+}
+
+.lens-gallery-track::-webkit-scrollbar-track {
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.lens-gallery-track::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.62), rgba(203, 213, 225, 0.82));
+  background-clip: padding-box;
+}
+
+.lens-gallery-track::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(90deg, rgba(186, 200, 220, 0.78), rgba(235, 241, 250, 0.96));
+  background-clip: padding-box;
+}

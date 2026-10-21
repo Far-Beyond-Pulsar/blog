@@ -12,6 +12,8 @@ import { visit } from 'unist-util-visit';
 import type { Plugin } from 'unified';
 import type { Root } from 'mdast';
 import { BASE_PATH } from '@/utils/site';
+import MarkdownGallery from './MarkdownGallery';
+import ImageZoomViewer from './ImageZoomViewer';
 import 'katex/dist/katex.min.css';
 
 // Lazy-load Monaco so it doesn't inflate the initial bundle
@@ -197,77 +199,18 @@ function PreBlock({ children }: { children?: React.ReactNode }) {
 
 function ImageBlock({ src, alt }: { src?: string; alt?: string }) {
   const [fullscreen, setFullscreen] = useState(false);
-  const panRef = useRef({ x: 0, y: 0, scale: 1 });
-  const imgRef = useRef<HTMLDivElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef({ dragging: false, startX: 0, startY: 0, panX: 0, panY: 0 });
-
-  useEffect(() => {
-    if (!fullscreen) { document.body.style.overflow = ''; return; }
-    document.body.style.overflow = 'hidden';
-    if (imgRef.current) {
-      imgRef.current.innerHTML = `<img src="${src}" style="width:90vw;height:90vh;object-fit:contain" />`;
-    }
-    return () => { document.body.style.overflow = ''; };
-  }, [fullscreen, src]);
-
-  useEffect(() => {
-    if (!fullscreen || !overlayRef.current) return;
-    const el = overlayRef.current;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      panRef.current.scale = Math.min(Math.max(panRef.current.scale * delta, 0.25), 8);
-      applyTransform();
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [fullscreen]);
-
-  const applyTransform = () => {
-    if (imgRef.current) {
-      const { panX, panY } = dragRef.current;
-      const { scale } = panRef.current;
-      imgRef.current.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
-    }
-  };
-
-  const resetView = () => {
-    panRef.current = { x: 0, y: 0, scale: 1 };
-    dragRef.current.panX = 0; dragRef.current.panY = 0;
-    applyTransform();
-  };
 
   return (
     <>
       <span className="inline-block relative group">
-        <img src={src} alt={alt || ''} className="max-w-full h-auto rounded-lg cursor-zoom-in" onClick={() => setFullscreen(true)} />
-        <button onClick={(e) => { e.stopPropagation(); setFullscreen(true); }} className="absolute top-2 right-2 px-3 py-1.5 text-sm rounded bg-black/60 hover:bg-black/80 text-white/80 hover:text-white transition-colors shadow-lg">
+        <button type="button" onClick={() => setFullscreen(true)} aria-label={`Zoom image: ${alt || 'image'}`} className="block cursor-zoom-in">
+          <img src={src} alt={alt || ''} className="max-w-full h-auto rounded-lg" />
+        </button>
+        <button type="button" onClick={() => setFullscreen(true)} className="absolute top-2 right-2 px-3 py-1.5 text-sm rounded bg-black/60 hover:bg-black/80 text-white/80 hover:text-white transition-colors shadow-lg">
           ⛶ Fullscreen
         </button>
       </span>
-      {fullscreen && (
-        <div ref={overlayRef} className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center overflow-hidden touch-none select-none"
-          onMouseDown={e => {
-            dragRef.current.dragging = true;
-            dragRef.current.startX = e.clientX - dragRef.current.panX;
-            dragRef.current.startY = e.clientY - dragRef.current.panY;
-          }}
-          onMouseMove={e => {
-            if (!dragRef.current.dragging) return;
-            dragRef.current.panX = e.clientX - dragRef.current.startX;
-            dragRef.current.panY = e.clientY - dragRef.current.startY;
-            applyTransform();
-          }}
-          onMouseUp={() => { dragRef.current.dragging = false; }}
-          onMouseLeave={() => { dragRef.current.dragging = false; }}
-        >
-          <button onClick={() => { setFullscreen(false); document.body.style.overflow = ''; }} className="absolute top-5 right-5 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-colors text-lg">✕</button>
-          <button onClick={resetView} className="absolute bottom-5 right-5 z-10 px-3 py-1.5 text-xs rounded bg-white/10 hover:bg-white/20 text-white/60 hover:text-white/90 transition-colors">Reset</button>
-          <div className="absolute top-5 left-5 text-xs text-white/30 select-none pointer-events-none">Scroll to zoom · Drag to pan</div>
-          <div ref={imgRef} className="pointer-events-none" style={{ transform: 'translate(0px, 0px) scale(1)' }} />
-        </div>
-      )}
+      {fullscreen && <ImageZoomViewer src={src || ''} alt={alt} onClose={() => setFullscreen(false)} />}
     </>
   );
 }
@@ -343,6 +286,170 @@ function AlertBlock({ alertType, children }: { alertType: string; children?: Rea
   );
 }
 
+/**
+ * Remark plugin for before/after sliders. Syntax (two images, no blank lines):
+ *
+ *   :::compare
+ *   ![Label for the left image](./assets/a.png)
+ *   ![Label for the right image](./assets/b.png)
+ *   :::
+ *
+ * Must run after remarkRewriteRelative so the image URLs are already resolved.
+ */
+function remarkCompareSlider() {
+  return (tree: any) => {
+    visit(tree, 'paragraph', (node: any) => {
+      const kids: any[] = node.children || [];
+      const first = kids[0];
+      const last = kids[kids.length - 1];
+      if (first?.type !== 'text' || !/^:::\s*compare\s*$/.test(first.value.trim())) return;
+      if (last?.type !== 'text' || last.value.trim() !== ':::') return;
+      const images = kids.filter(k => k.type === 'image');
+      if (images.length !== 2) return;
+      const [a, b] = images;
+      node.type = 'div';
+      node.children = [];
+      node.data = {
+        hProperties: {
+          'data-compare': 'true',
+          'data-a-src': a.url,
+          'data-a-label': a.alt || '',
+          'data-b-src': b.url,
+          'data-b-label': b.alt || '',
+        },
+      };
+    });
+  };
+}
+
+/**
+ * Remark plugin for image galleries. Syntax (one image per line, no blank lines):
+ *
+ *   :::gallery
+ *   ![Caption](./assets/a.png)
+ *   ![Caption](./assets/b.png)
+ *   :::
+ *
+ * Up to nine images become a grid; larger galleries become a browsable carousel.
+ * Must run after remarkRewriteRelative so image URLs are already resolved.
+ */
+function remarkImageGallery() {
+  return (tree: any) => {
+    visit(tree, 'paragraph', (node: any) => {
+      const kids: any[] = node.children || [];
+      const first = kids[0];
+      const last = kids[kids.length - 1];
+      if (first?.type !== 'text' || !/^:::\s*gallery\s*$/.test(first.value.trim())) return;
+      if (last?.type !== 'text' || last.value.trim() !== ':::') return;
+      const images = kids.filter(k => k.type === 'image');
+      if (images.length === 0) return;
+      const items = images.map((image: any) => ({
+        src: image.url,
+        alt: image.alt || '',
+      }));
+      node.type = 'div';
+      node.children = [];
+      node.data = {
+        hProperties: {
+          'data-gallery': 'true',
+          'data-gallery-items': JSON.stringify(items),
+        },
+      };
+    });
+  };
+}
+
+function CompareSlider({ aSrc, aLabel, bSrc, bLabel }: { aSrc: string; aLabel: string; bSrc: string; bLabel: string }) {
+  const [pos, setPos] = useState(50);
+  const [zoomed, setZoomed] = useState<{ src: string; alt: string } | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const pointerRef = useRef<{ id: number; startX: number; dragging: boolean } | null>(null);
+
+  const moveTo = (clientX: number) => {
+    const rect = boxRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    setPos(Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100)));
+  };
+
+  const reset = { margin: 0, border: 0, borderRadius: 0, maxWidth: 'none' } as const;
+  const tag = 'absolute top-3 px-2 py-0.5 rounded bg-black/60 text-white/90 text-xs font-medium pointer-events-none select-none';
+
+  return (
+    <>
+    <figure className="not-prose my-6">
+      <div
+        ref={boxRef}
+        className="relative overflow-hidden rounded-lg select-none touch-none cursor-ew-resize"
+        role="group"
+        tabIndex={0}
+        aria-label="Drag to compare the images. Click to zoom the visible side."
+        onPointerDown={e => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          pointerRef.current = { id: e.pointerId, startX: e.clientX, dragging: false };
+        }}
+        onPointerMove={e => {
+          const pointer = pointerRef.current;
+          if (!pointer || pointer.id !== e.pointerId || !e.currentTarget.hasPointerCapture(e.pointerId)) return;
+          if (!pointer.dragging && Math.abs(e.clientX - pointer.startX) < 3) return;
+          pointer.dragging = true;
+          moveTo(e.clientX);
+        }}
+        onPointerUp={e => {
+          const pointer = pointerRef.current;
+          if (!pointer || pointer.id !== e.pointerId) return;
+          if (!pointer.dragging) {
+            const rect = boxRef.current?.getBoundingClientRect();
+            const clickPosition = rect ? ((e.clientX - rect.left) / rect.width) * 100 : pos;
+            setZoomed(clickPosition <= pos
+              ? { src: aSrc, alt: aLabel }
+              : { src: bSrc, alt: bLabel });
+          }
+          pointerRef.current = null;
+        }}
+        onPointerCancel={() => { pointerRef.current = null; }}
+        onKeyDown={e => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          setZoomed(pos >= 50 ? { src: aSrc, alt: aLabel } : { src: bSrc, alt: bLabel });
+        }}
+      >
+        {/* B is the base layer and defines the size; A is clipped on top of it */}
+        <img src={bSrc} alt={bLabel} draggable={false} className="block w-full h-auto" style={reset} />
+        <img
+          src={aSrc}
+          alt={aLabel}
+          draggable={false}
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ ...reset, clipPath: `inset(0 ${100 - pos}% 0 0)` }}
+        />
+        {aLabel && <span className={`${tag} left-3`}>{aLabel}</span>}
+        {bLabel && <span className={`${tag} right-3`}>{bLabel}</span>}
+        <div
+          className="absolute top-0 bottom-0 w-0.5 bg-white/90 shadow-[0_0_6px_rgba(0,0,0,0.6)] pointer-events-none"
+          style={{ left: `${pos}%`, transform: 'translateX(-50%)' }}
+        >
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 text-black/70 flex items-center justify-center text-sm shadow-lg">
+            ⇆
+          </div>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={0.5}
+          value={pos}
+          aria-label="Image comparison position"
+          onChange={e => setPos(Number(e.target.value))}
+          className="absolute inset-0 w-full h-full opacity-0 pointer-events-none focus-visible:opacity-100 focus-visible:pointer-events-none"
+          style={{ background: 'transparent' }}
+        />
+      </div>
+    </figure>
+    {zoomed && <ImageZoomViewer src={zoomed.src} alt={zoomed.alt} onClose={() => setZoomed(null)} />}
+    </>
+  );
+}
+
 /** Left alone: absolute URLs, protocol-relative, data URIs, anchors, mail/tel. */
 const NON_RELATIVE = /^([a-z][a-z0-9+.-]*:|\/\/|#)/i;
 
@@ -412,7 +519,9 @@ function remarkRewriteRelative(slug: string): Plugin<[], Root> {
 }
 
 export default function BlogMarkdown({ content, slug }: { content: string; slug?: string }) {
-  const plugins = slug ? [remarkGfm, remarkMath, remarkAlertPlugin, remarkRewriteRelative(slug)] : [remarkGfm, remarkMath, remarkAlertPlugin];
+  const plugins = slug
+    ? [remarkGfm, remarkMath, remarkAlertPlugin, remarkRewriteRelative(slug), remarkCompareSlider, remarkImageGallery]
+    : [remarkGfm, remarkMath, remarkAlertPlugin, remarkCompareSlider, remarkImageGallery];
 
   return (
     <div className="prose">
@@ -425,6 +534,25 @@ export default function BlogMarkdown({ content, slug }: { content: string; slug?
           img:   ImageBlock as any,
           table: TableWrapper as any,
           div:   (props: any) => {
+            if (props['data-gallery']) {
+              let items = [];
+              try {
+                items = JSON.parse(props['data-gallery-items'] || '[]');
+              } catch {
+                return null;
+              }
+              return <MarkdownGallery items={items} />;
+            }
+            if (props['data-compare']) {
+              return (
+                <CompareSlider
+                  aSrc={props['data-a-src']}
+                  aLabel={props['data-a-label']}
+                  bSrc={props['data-b-src']}
+                  bLabel={props['data-b-label']}
+                />
+              );
+            }
             if (props['data-alert']) {
               return <AlertBlock alertType={props['data-alert']}>{props.children}</AlertBlock>;
             }

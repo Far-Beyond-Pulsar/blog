@@ -157,7 +157,7 @@ Moving code surfaced real bugs, some of them old:
 | Kind plugins in Pulsar | 0 | 16 |
 | `engine_backend` reaching into a kind's pass | fog, post, water, voxel | none (TSR is the frame's, and the host still resets its history) |
 
-Helio's diff over the week is 12k lines added and 375k removed. Pulsar's is 423k added and 17k removed. Most of that is the same code changing address. Helio took 135 commits and Pulsar 195, between November 1 and 7. Tristan wrote 66 of the Pulsar commits. His water work and multiple directional lights landed on the stack while it was being built and were merged up through every phase.
+Helio's diff over the week is 12k lines added and 375k removed. Pulsar's is 423k added and 17k removed. Most of that is the same code changing address. Helio took 135 commits and Pulsar 195, between November 1 and 7.
 
 ## 10. What comes next
 

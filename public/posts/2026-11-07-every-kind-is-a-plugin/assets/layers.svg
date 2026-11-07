@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 680" font-family="IBM Plex Sans, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1200" height="680" fill="#0f141a"/>
+  <text x="40" y="52" fill="#e6ebf1" font-size="26" font-weight="600">Helio and Pulsar after the rewrite</text>
+  <text x="40" y="80" fill="#9aa7b5" font-size="15">Dependencies point down. Kinds meet only at the frame's contracts and each other's api crates.</text>
+
+  <!-- Pulsar plugins band -->
+  <rect x="40" y="108" width="1120" height="214" rx="12" fill="#161d25" stroke="#2a3542"/>
+  <text x="60" y="138" fill="#7fb0ee" font-size="15" font-weight="600" letter-spacing="1">PULSAR · plugins/vendor/&lt;kind&gt;</text>
+  <g font-size="14" fill="#e6ebf1">
+    <g transform="translate(60,156)">
+      <rect width="250" height="146" rx="8" fill="#1b2a3d" stroke="#2f4a6b"/>
+      <text x="16" y="28" font-weight="600">component</text>
+      <text x="16" y="52" fill="#9aa7b5">SceneDB data + scriptable</text>
+      <text x="16" y="72" fill="#9aa7b5">methods; editor and scripts</text>
+      <text x="16" y="92" fill="#9aa7b5">call the same ones</text>
+      <text x="16" y="124" fill="#7fb0ee">publishes rows by key</text>
+    </g>
+    <g transform="translate(330,156)">
+      <rect width="250" height="146" rx="8" fill="#1b2a3d" stroke="#2f4a6b"/>
+      <text x="16" y="28" font-weight="600">api</text>
+      <text x="16" y="52" fill="#9aa7b5">BufferContract keys, row</text>
+      <text x="16" y="72" fill="#9aa7b5">ABIs, WGSL snippets other</text>
+      <text x="16" y="92" fill="#9aa7b5">kinds may include</text>
+      <text x="16" y="124" fill="#7fb0ee">no statics</text>
+    </g>
+    <g transform="translate(600,156)">
+      <rect width="250" height="146" rx="8" fill="#1b2a3d" stroke="#2f4a6b"/>
+      <text x="16" y="28" font-weight="600">feature</text>
+      <text x="16" y="52" fill="#9aa7b5">Helio passes, graph nodes,</text>
+      <text x="16" y="72" fill="#9aa7b5">settings, debug views,</text>
+      <text x="16" y="92" fill="#9aa7b5">scene derivation</text>
+      <text x="16" y="124" fill="#7fb0ee">joins slots and phases</text>
+    </g>
+    <g transform="translate(870,156)">
+      <rect width="270" height="146" rx="8" fill="#1b2a3d" stroke="#2f4a6b"/>
+      <text x="16" y="28" font-weight="600">editor · examples</text>
+      <text x="16" y="52" fill="#9aa7b5">tools, panels, undo, save</text>
+      <text x="16" y="72" fill="#9aa7b5">hooks through the level</text>
+      <text x="16" y="92" fill="#9aa7b5">editor's extension points</text>
+      <text x="16" y="124" fill="#7fb0ee">absent when disabled</text>
+    </g>
+  </g>
+
+  <!-- arrow -->
+  <path d="M600 332 L600 368" stroke="#9aa7b5" stroke-width="2"/>
+  <path d="M592 360 L600 372 L608 360" fill="none" stroke="#9aa7b5" stroke-width="2"/>
+
+  <!-- Helio band -->
+  <rect x="40" y="380" width="1120" height="270" rx="12" fill="#161d25" stroke="#2a3542"/>
+  <text x="60" y="410" fill="#6fd19b" font-size="15" font-weight="600" letter-spacing="1">HELIO · knows no object kind</text>
+  <g font-size="14">
+    <g transform="translate(60,428)">
+      <rect width="1080" height="56" rx="8" fill="#15301f" stroke="#2c5a3d"/>
+      <text x="16" y="24" fill="#e6ebf1" font-weight="600">presets · helio facade</text>
+      <text x="16" y="44" fill="#9aa7b5">graphs are data; the feature list comes from the engine's plugins</text>
+    </g>
+    <g transform="translate(60,494)">
+      <rect width="530" height="66" rx="8" fill="#15301f" stroke="#2c5a3d"/>
+      <text x="16" y="26" fill="#e6ebf1" font-weight="600">frame api</text>
+      <text x="16" y="48" fill="#9aa7b5">slots, draw phases, G-buffer, colour chain, lighting inputs</text>
+    </g>
+    <g transform="translate(610,494)">
+      <rect width="530" height="66" rx="8" fill="#15301f" stroke="#2c5a3d"/>
+      <text x="16" y="26" fill="#e6ebf1" font-weight="600">spine</text>
+      <text x="16" y="48" fill="#9aa7b5">background, G-buffer clear, Hi-Z, unlit stand-in, TSR, tone map</text>
+    </g>
+    <g transform="translate(60,570)">
+      <rect width="1080" height="62" rx="8" fill="#15301f" stroke="#2c5a3d"/>
+      <text x="16" y="26" fill="#e6ebf1" font-weight="600">feature api · core</text>
+      <text x="16" y="48" fill="#9aa7b5">Feature trait and registrar, BufferContract, render graph, uploads, shaders, profiling</text>
+    </g>
+  </g>
+</svg>

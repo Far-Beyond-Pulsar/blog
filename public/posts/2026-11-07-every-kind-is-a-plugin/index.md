@@ -150,7 +150,7 @@ Moving code surfaced real bugs, some of them old:
 
 | | October 31 | November 7 |
 |---|---|---|
-| Helio crates | 70 (54 passes) | 17 core crates and 11 small passes, still being trimmed |
+| Helio crates | 70 (54 passes) | 17 core crates and 11 small passes |
 | SceneDB components in Helio (outside its test host) | 31 | 0 |
 | Graph builder functions | 27 | 0, presets are data |
 | Recorded layer violations | 19 | 0 |
@@ -161,12 +161,10 @@ Helio's diff over the week is 12k lines added and 375k removed. Pulsar's is 423k
 
 ## 10. What comes next
 
-The repo split is running now. Each of the 16 in-tree kind plugins becomes its own `Plugin_<Kind>` repository, kept as a submodule at the same path, the way Physics, Input and SKM already work. Helio's layer gate gains a rule that no crate in the Helio repo may name a kind's contract outside its test host. Some of the remaining passes in Helio are being reviewed under that rule. The old SDF pass is being deleted.
-
-Deferred work has its own issues, prefixed `Post_Split-`:
+Three design items are open, each tracked as an issue:
 
 - Views for reflections and portals. Today water's reflection capture names the meshes' passes and the portals keep their own copy of the mesh G-buffer program. A view graph composed from the frame's phases removes both and lets foliage, decals and virtual geometry appear in reflections.
 - The final structure of virtual geometry and of the animation runtime. Both moved structurally and kept their open problems.
 - Pulsar's own kernel. The rule Helio now follows should also hold for Pulsar's core and editor: no kind, subsystem or tool named in core.
 
-After that the work turns to the frame itself: a ray-tracing scene owned by the frame, ReSTIR-class direct lighting, a radiance cache, ray-traced reflections and one reconstruction service.
+The next rendering work builds on the frame's contracts: a ray-tracing scene owned by the frame, ReSTIR-class direct lighting, a radiance cache, ray-traced reflections and one reconstruction service.

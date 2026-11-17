@@ -4,7 +4,7 @@ date: "2026-11-17"
 author: ["Tuafo", "tristanpoland"]
 tags: ["rust", "helio", "pulsar", "architecture", "plugins", "rendering", "scenedb", "wgsl"]
 description: "Between November 1 and 17 we moved every object kind out of the Helio renderer and into Pulsar plugins, then gave each plugin its own repository. Helio now knows no meshes, lights, materials, voxels or water. This post covers the rules, the layers, the contracts between them, the checks that keep them, and the numbers before and after."
-thumbnail: ./assets/layers.svg
+thumbnail: ./assets/thumb.png
 ---
 
 Helio used to know about everything it drew. Meshes, lights, materials, the sky, voxel terrain, water, foliage, decals and portals each had code inside the renderer, and most of them also had a SceneDB component there. None of that is in Helio now. Every object kind is a Pulsar plugin with its own repository. The plugin owns its data, its rendering, its file formats and its editor UI, and Helio is the frame those plugins draw into.

@@ -11,7 +11,7 @@ Helio used to know about everything it drew. Meshes, lights, materials, the sky,
 
 This post covers what the rewrite changed and why, in the order the pieces depend on each other. The first half is the rewrite inside the two repositories, from November 1 to 7. The second half is what came after: the repository split, the plugin kernel, Pulsar's own kernel, engine-owned renderers, views and portals.
 
-![Helio and Pulsar after the rewrite: plugins on top, Helio's frame, spine and core below](./assets/layers.svg)
+![Helio and Pulsar after the rewrite: plugins on top, Helio's frame, spine and core below](./assets/layers.png)
 
 ## 1. Where the code was on October 31
 
@@ -32,15 +32,12 @@ The causes were structural. A pass was the only unit Helio had, but the real uni
 
 ## 2. The rules
 
-Four rules came out of that diagnosis, and the rewrite applied them to every kind.
+Four rules emerged out of that diagnosis, and the rewrite applied them to every kind.
 
-Every object kind is a Pulsar plugin. The plugin owns its SceneDB component, the Helio feature that renders it, its scene derivation, its file formats and its editor UI.
-
-Component methods are the API. The editor calls the same scriptable methods a script would. No renderer setters for one kind, no mailbox messages, no reaching into a pass by type.
-
-Helio knows no object kind. It has no API for meshes, lights, materials, voxels, water, sky, fog or any other kind. A feature's passes read only what components publish.
-
-One owner per concept. Materials, lights, the sun, wind, water, shadows and GI each have exactly one owning plugin. Other kinds use the owner's api crate or WGSL snippet and never keep a private copy. A kind adds only its own addressing: UVs for meshes, triplanar and per-voxel ids for voxels.
+- Every object kind is a Pulsar plugin. The plugin owns its SceneDB component, the Helio feature that renders it, its scene derivation, its file formats and its editor UI.
+- Component methods are the API. The editor calls the same scriptable methods a script would. No renderer setters for one kind, no mailbox messages, no reaching into a pass by type.
+- Helio knows no object kind. It has no API for meshes, lights, materials, voxels, water, sky, fog or any other kind. A feature's passes read only what components publish.
+- One owner per concept. Materials, lights, the sun, wind, water, shadows and GI each have exactly one owning plugin. Other kinds use the owner's api crate or WGSL snippet and never keep a private copy. A kind adds only its own addressing: UVs for meshes, triplanar and per-voxel ids for voxels.
 
 ## 3. The layers
 

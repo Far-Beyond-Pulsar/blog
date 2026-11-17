@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
-/** Full-screen image viewer shared by Markdown images, compares, and galleries. */
+/** Full-screen image viewer shared by Markdown images, compares, and galleries. Supports raster images and SVG. */
 export default function ImageZoomViewer({ src, alt, onClose }: {
   src: string;
   alt?: string;
@@ -14,6 +14,8 @@ export default function ImageZoomViewer({ src, alt, onClose }: {
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+
+  const isSVG = src.toLowerCase().endsWith('.svg');
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -44,6 +46,27 @@ export default function ImageZoomViewer({ src, alt, onClose }: {
     setPan({ x: 0, y: 0 });
   };
 
+  const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.currentTarget instanceof HTMLImageElement || event.currentTarget instanceof HTMLObjectElement) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    const start = drag.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    setPan({ x: start.panX + event.clientX - start.x, y: start.panY + event.clientY - start.y });
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    if (drag.current?.pointerId === event.pointerId) drag.current = null;
+  };
+
+  const handlePointerCancel = () => {
+    drag.current = null;
+  };
+
   return (
     <div
       ref={overlayRef}
@@ -56,26 +79,35 @@ export default function ImageZoomViewer({ src, alt, onClose }: {
       }}
     >
       <div className="pointer-events-none absolute left-5 top-5 text-xs text-white/55">Scroll to zoom · Drag to pan</div>
-      <img
-        src={src}
-        alt={alt || ''}
-        draggable={false}
-        className="max-h-[90vh] max-w-[90vw] cursor-grab object-contain active:cursor-grabbing"
-        style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}
-        onPointerDown={event => {
-          event.currentTarget.setPointerCapture(event.pointerId);
-          drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
-        }}
-        onPointerMove={event => {
-          const start = drag.current;
-          if (!start || start.pointerId !== event.pointerId) return;
-          setPan({ x: start.panX + event.clientX - start.x, y: start.panY + event.clientY - start.y });
-        }}
-        onPointerUp={event => {
-          if (drag.current?.pointerId === event.pointerId) drag.current = null;
-        }}
-        onPointerCancel={() => { drag.current = null; }}
-      />
+      
+      {isSVG ? (
+        <object
+          data={src}
+          type="image/svg+xml"
+          draggable={false}
+          className="max-h-[90vh] max-w-[90vw] cursor-grab object-contain active:cursor-grabbing"
+          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
+        >
+          <img src={src} alt={alt || ''} />
+        </object>
+      ) : (
+        <img
+          src={src}
+          alt={alt || ''}
+          draggable={false}
+          className="max-h-[90vh] max-w-[90vw] cursor-grab object-contain active:cursor-grabbing"
+          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
+        />
+      )}
+      
       <button
         type="button"
         onClick={onClose}

@@ -103,12 +103,20 @@ function GalleryCarousel({ items }: { items: MarkdownGalleryItem[] }) {
           aria-label={`Zoom image: ${activeItem.alt || `image ${activeIndex + 1}`}`}
           className="absolute inset-0 z-0 flex cursor-zoom-in items-center justify-center"
         >
-          <img
-            src={activeItem.src}
-            alt={activeItem.alt}
-            loading="lazy"
-            className="h-full w-full object-contain"
-          />
+          {activeItem.src.toLowerCase().endsWith('.svg') ? (
+            <object
+              data={activeItem.src}
+              type="image/svg+xml"
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            <img
+              src={activeItem.src}
+              alt={activeItem.alt}
+              loading="lazy"
+              className="h-full w-full object-contain"
+            />
+          )}
         </button>
         <button
           type="button"

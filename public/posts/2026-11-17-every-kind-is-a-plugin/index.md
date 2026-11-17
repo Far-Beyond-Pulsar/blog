@@ -301,3 +301,5 @@ These items are open, each tracked as an issue or a design question:
 - The clippy lane, which still fails on lints older than the rewrite.
 
 The next rendering work builds on the frame's contracts: one ray-traced scene owned by the frame, GI from hardware ray tracing, a surface cache for ray hits, ReSTIR-class direct lighting, ray-traced reflections and one reconstruction service.
+
+![Scene](./assets/thumb.png)

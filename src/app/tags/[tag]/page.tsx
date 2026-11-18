@@ -22,7 +22,12 @@ export async function generateMetadata({ params }: { params: Promise<{ tag: stri
   // Lead with the newest tagged post's thumbnail so a shared tag archive gets a
   // card that reflects its contents rather than the generic site image.
   const newest = posts.find((p: { tags: string[] }) => p.tags.includes(tag));
-  const image = resolveOgImage(newest?.thumbnail, newest?.thumbnailWidth, newest?.thumbnailHeight, title);
+  const image = resolveOgImage(
+    newest?.socialThumbnail || newest?.thumbnail,
+    newest?.socialThumbnail ? newest.socialThumbnailWidth : newest?.thumbnailWidth,
+    newest?.socialThumbnail ? newest.socialThumbnailHeight : newest?.thumbnailHeight,
+    title,
+  );
 
   return {
     title,

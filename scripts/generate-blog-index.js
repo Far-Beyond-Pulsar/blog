@@ -1,6 +1,7 @@
 /**
  * Reads all markdown posts from public/posts/, extracts frontmatter,
  * computes reading time, writes blog-index.json, blog-preview.json, and blog-all.json.
+ * Oversized local thumbnails also get separate social-card images in public/social-cards/.
  *
  * Post filenames become slugs: "2024-01-15-helio-renderer.md" → "2024-01-15-helio-renderer"
  */
@@ -8,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const readingTime = require('reading-time');
+const { createSocialCard, MAX_CARD_BYTES } = require('./social-card-image');
 
 const postsDir = path.join(process.cwd(), 'public/posts');
 const indexFile = path.join(process.cwd(), 'public/blog-index.json');
@@ -114,6 +116,7 @@ function imageSize(absPath) {
   }
 }
 
+async function main() {
 if (!fs.existsSync(postsDir)) {
   fs.mkdirSync(postsDir, { recursive: true });
   console.log('Created public/posts/ — add markdown files there.');
@@ -157,6 +160,7 @@ for (const file of files) {
   let thumbnail = data.thumbnail || null;
   let thumbnailWidth = null;
   let thumbnailHeight = null;
+  let socialCard = null;
   if (thumbnail && !thumbnail.startsWith('http://') && !thumbnail.startsWith('https://')) {
     if (file.endsWith('/index.md') && thumbnail.startsWith('./')) {
       thumbnail = `/posts/${slug}/` + thumbnail.slice(2);
@@ -169,6 +173,21 @@ for (const file of files) {
       thumbnailHeight = dims.height;
     } else {
       console.warn(`  ! ${slug}: thumbnail "${thumbnail}" not found or unreadable — card will have no image dimensions`);
+    }
+    const source = path.join(process.cwd(), 'public', thumbnail);
+    let size;
+    try {
+      size = fs.statSync(source).size;
+    } catch (error) {
+      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+    }
+    if (size >= MAX_CARD_BYTES) {
+      const card = await createSocialCard(source, path.join(process.cwd(), 'public', 'social-cards'), slug);
+      socialCard = {
+        socialThumbnail: `${BASE}/social-cards/${card.filename}`,
+        socialThumbnailWidth: card.width,
+        socialThumbnailHeight: card.height,
+      };
     }
     thumbnail = BASE + thumbnail;
   }
@@ -193,6 +212,7 @@ for (const file of files) {
     thumbnail,
     thumbnailWidth,
     thumbnailHeight,
+    ...socialCard,
     draft: data.draft === 'true',
   });
 }
@@ -315,10 +335,9 @@ console.log(`Generated oembed/ — ${published.length} documents`);
  * a bare link on the platforms whose limits the image blows past. Silent
  * failure here is the norm, so it is worth being loud at build time.
  *
- * Limits: X and LinkedIn reject over 5 MB; Discord and Facebook allow 8 MB.
+ * Oversized local images get a separate compressed card for X and Open Graph.
  * Discord will not proxy an image wider than 4096px.
  */
-const MAX_CARD_BYTES = 5 * 1024 * 1024;
 const MAX_CARD_EDGE = 4096;
 const warnings = [];
 
@@ -336,8 +355,8 @@ for (const p of published) {
     warnings.push(`${p.slug}: thumbnail "${rel}" does not exist on disk — card will have no image`);
     continue;
   }
-  if (bytes > MAX_CARD_BYTES) {
-    warnings.push(`${p.slug}: thumbnail is ${(bytes / 1024 / 1024).toFixed(1)} MB — over the 5 MB limit on X and LinkedIn, those cards will render without an image`);
+  if (bytes >= MAX_CARD_BYTES && !p.socialThumbnail) {
+    warnings.push(`${p.slug}: thumbnail is over the 5 MB limit on X and LinkedIn and has no compressed social card`);
   }
   if (p.thumbnailWidth > MAX_CARD_EDGE || p.thumbnailHeight > MAX_CARD_EDGE) {
     warnings.push(`${p.slug}: thumbnail is ${p.thumbnailWidth}x${p.thumbnailHeight} — over Discord's 4096px proxy limit`);
@@ -349,3 +368,9 @@ if (warnings.length) {
   for (const w of warnings) console.warn(`  ! ${w}`);
   console.warn('');
 }
+}
+
+main().catch(error => {
+  console.error('Failed to generate blog index:', error);
+  process.exitCode = 1;
+});

@@ -23,7 +23,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   if (!meta) return { title: 'Not Found' };
 
   const url = postUrl(slug);
-  const image = resolveOgImage(meta.thumbnail, meta.thumbnailWidth, meta.thumbnailHeight, meta.title);
+  const image = resolveOgImage(
+    meta.socialThumbnail || meta.thumbnail,
+    meta.socialThumbnail ? meta.socialThumbnailWidth : meta.thumbnailWidth,
+    meta.socialThumbnail ? meta.socialThumbnailHeight : meta.thumbnailHeight,
+    meta.title,
+  );
   const authorNames: string[] = (meta.authorData?.length ? meta.authorData.map((a: Author) => a.name || a.login) : meta.author) || [];
 
   return {
